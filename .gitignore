@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+
+# 登录凭证，勿提交
+cookie.json
+**/cookie.json
+
+# 可选：本地大文件/导出（需要纳入版本时删掉对应行）
+# *.xlsx
