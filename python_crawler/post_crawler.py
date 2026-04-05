@@ -11,6 +11,8 @@ import urllib.error
 import urllib.request
 import xlsxwriter
 
+from crawler_paths import COOKIE_FILE, crawled_path, ensure_crawled_dir
+
 WEIBO_ORIGIN = "https://weibo.com"
 # 帖子页偶发加载失败 / 选择器未就绪时，刷新并重新打开
 MAX_POST_PAGE_RETRIES = 4
@@ -36,7 +38,7 @@ def open_weibo_post(driver, url, wait_extra=0):
 def inject_cookies(driver):
     """在 weibo.com 域下页面调用；跳过域名不匹配或格式无效的 cookie，避免 InvalidCookieDomain 中断。"""
     try:
-        with open("cookie.json", "r", encoding="utf-8") as f:
+        with open(COOKIE_FILE, "r", encoding="utf-8") as f:
             cookies = json.loads(f.read())
     except FileNotFoundError:
         return
@@ -252,7 +254,7 @@ def _post_bid_from_url(post_url: str):
 
 def _cookie_header_from_json():
     try:
-        with open("cookie.json", "r", encoding="utf-8") as f:
+        with open(COOKIE_FILE, "r", encoding="utf-8") as f:
             cookies = json.loads(f.read())
     except (FileNotFoundError, json.JSONDecodeError, TypeError):
         return ""
@@ -705,10 +707,11 @@ def precise_scratch(url,driver,file_name):
 count = -1
 
 if __name__ == "__main__":
+    ensure_crawled_dir()
     driver = webdriver.Chrome()  # 启动浏览器
     driver.set_window_size(600, 1000)
-    file_name = "西贝超话帖子"
-    df = pd.read_excel("西贝超话url.xlsx")
+    file_name = crawled_path("xibei_apology_topic_posts_9.15-9.18")
+    df = pd.read_excel(crawled_path("xibei_apology_topic_urls_9.15-9.18.xlsx"))
     # 勿用 [1:]：会丢掉 Excel 里第一行数据；逐条 try 避免一条报错后整表中断
     for _url in df["url"].dropna().tolist():
         try:

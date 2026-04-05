@@ -5,8 +5,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from collections import defaultdict
 import pandas as pd
 
+from paths_config import data_join
+
 # 使用哈工大停止词表
-f = open("./data/stopwords.txt",encoding='utf-8')
+f = open(data_join("stopwords.txt"), encoding="utf-8")
 stopwords = f.readlines()
 stopwords = [t.strip('\n') for t in stopwords] # 1661个词
 

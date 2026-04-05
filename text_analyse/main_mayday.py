@@ -1,5 +1,11 @@
 # %% 标签添加按 ctrl+f11 或者直接 f11
 # 读入函数
+import os
+
+from paths_config import ROOT
+
+os.chdir(ROOT)
+
 import pandas as pd
 from _1_数据预处理与分词 import process_data
 from _2_统计词频 import count_word
@@ -11,8 +17,6 @@ from _8_画相关词的树图 import draw_tree
 from _9_情感分析 import sentiment_analysis
 # %%
 # 创建文件夹
-import os
-
 def create_folder(path):
     if not os.path.exists(path):
         os.makedirs(path)

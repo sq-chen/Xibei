@@ -6,7 +6,9 @@ import pandas as pd
 from collections import defaultdict
 import re
 
+from crawler_paths import COOKIE_FILE, crawled_path, ensure_crawled_dir
 
+ensure_crawled_dir()
 driver = webdriver.Chrome()  # 启动浏览器
 driver.set_window_size(100, 800)
 base_url = ("https://s.weibo.com/topic?q=%E8%A5%BF%E8%B4%9D&pagetype=topic&topic=1&Refer=topic_topic&page=")
@@ -14,13 +16,13 @@ regex = re.compile("(\d+)")
 page = 0
 result = defaultdict(list)
 #while True:
-while page < 10:
+while page < 1:
     page += 1
     try:
         url = base_url + str(page)
         driver.get(url)  # 打开网页
         # 读取cookie的json文件
-        f = open('cookie.json', 'r')
+        f = open(COOKIE_FILE, "r", encoding="utf-8")
         listCookie = json.loads(f.read())  # 读取文件中的cookies数据
         # 将cookie塞到浏览器中，绕过登录
         for cookie in listCookie:
@@ -45,5 +47,5 @@ while page < 10:
 
 
 result = pd.DataFrame(result)
-result.to_excel("西贝话题.xlsx")
+result.to_excel(crawled_path("xibei_hashtag_topics.xlsx"))
 driver.close()

@@ -36,6 +36,13 @@ def token_calculate(ss):
 def relative_freq(user_freq,freq_overall):
     return user_freq / sum(freq_overall) * 100
 
+def _contribution_meta_cols(temp_df):
+    cols = ['name']
+    if 'ID' in temp_df.columns:
+        cols.append('ID')
+    cols.extend(['url', 'date'])
+    return cols
+
 def calculate_contribution(temp_df,column,sta_tokens,token_col,threshold,):
     # temp_df:包含分词结果的pickle文件
     # column:'中文分词'；"名动形"
@@ -57,12 +64,13 @@ def calculate_contribution(temp_df,column,sta_tokens,token_col,threshold,):
     temp_df[column+'_mention'] = temp_df[column].apply(token_filter, tokens_overall=tokens_overall)
     # 统计用户提及目标高频词的次数
     temp_df[column+'_mention_num'] = temp_df[column+'_mention'].map(token_calculate)
+    meta = _contribution_meta_cols(temp_df)
     if token_col == 'tfidf':
-        df_copy = temp_df[['name', 'ID', 'url', 'date', column + '_mention', column + '_mention_num']]
+        df_copy = temp_df[meta + [column + '_mention', column + '_mention_num']]
     else:
         # 统计用户提及目标高频词的百分比
         temp_df[column+'_mention_per'] = temp_df[column+'_mention_num'].apply(relative_freq, freq_overall=freq_overall)
-        df_copy = temp_df[['name', 'ID','url', 'date', column+'_mention', column+'_mention_num', column+'_mention_per']]
+        df_copy = temp_df[meta + [column+'_mention', column+'_mention_num', column+'_mention_per']]
     return df_sta_new,df_copy
 
 def keyword_contriution(input_pickle,read_token,nva,token_col,output,thresholds=[0.01,0.03,0.05,0.1,0.2,0.3]):

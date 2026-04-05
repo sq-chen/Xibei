@@ -15,16 +15,13 @@ import emoji
 from collections import defaultdict
 import math
 
-pwd_path = os.path.abspath(os.path.dirname(__file__))
+from paths_config import data_join
 
-# 情感词典
-sentiment_dict_path = os.path.join(pwd_path, 'data/情感词典.xlsx')
-# 连词词典
-conjunction_dict_path = os.path.join(pwd_path, 'data/conjunction_dict.txt')
-# 副词词典
-adverb_dict_path = os.path.join(pwd_path, 'data/adverb_dict.txt')
-# 否定词典
-denial_dict_path = os.path.join(pwd_path, 'data/denial_dict.txt')
+# 情感词典（均在仓库根目录 data/）
+sentiment_dict_path = data_join("情感词典.xlsx")
+conjunction_dict_path = data_join("conjunction_dict.txt")
+adverb_dict_path = data_join("adverb_dict.txt")
+denial_dict_path = data_join("denial_dict.txt")
 # 21种情感
 emotion_tags =["快乐(PA)","安心(PE)","尊敬(PD)","赞扬(PH)","相信(PG)","喜爱(PB)","祝愿(PK)",
               "愤怒(NNA)","惊奇(PC)",
@@ -384,7 +381,10 @@ def sentiment_analysis(input,output):
         r = pd.DataFrame(r, index=[index])
         res = pd.concat([res, r])
     res = pd.concat([df, res], axis=1)
-    score = res[['ID', 'sentiment_num'] + emotion_tags].copy()
+    id_col = 'ID' if 'ID' in res.columns else 'url'
+    score = res[[id_col, 'sentiment_num'] + emotion_tags].copy()
+    if id_col != 'ID':
+        score = score.rename(columns={id_col: 'ID'})
     score.to_excel(output+"-spss.xlsx")  # 生成每个帖子的21种情感分数
 
     # 对每种情绪分数进行分数除法

@@ -5,8 +5,10 @@ import regex as re
 import pandas as pd
 import numpy as np
 
+from paths_config import data_join, resolve as _resolve_path
+
 ###将繁体转换为简体
-converter = opencc.OpenCC('t2s.json')
+converter = opencc.OpenCC('t2s')  # 库会自动加 .json，勿写 t2s.json 否则变成 t2s.json.json
 def simplified(text):
     if isinstance(text,str):
         return converter.convert(text)
@@ -14,8 +16,8 @@ def simplified(text):
         return text
 
 
-# 使用哈工大停止词表
-f = open("./data/stopwords.txt",encoding='utf-8')
+# 使用哈工大停止词表（仓库根目录 data/）
+f = open(data_join("stopwords.txt"), encoding="utf-8")
 stopwords = f.readlines()
 stopwords = [t.strip('\n') for t in stopwords] # 1661个词
 
@@ -49,7 +51,7 @@ def tokenize(text):
     # 分词的匹配规则：能将一些特殊的表情符号分出来，如 →_→
     posseg.re_han_internal = re.compile("([\u4E00-\u9FD5\U00010000-\U0010ffffa-zA-Z0-9+#&\._\-\W\w% ]+)", re.U)
     # 加载用户分词词典
-    jieba.load_userdict('./data/jieba_user_dict.txt')
+    jieba.load_userdict(data_join("jieba_user_dict.txt"))
     return posseg.lcut(text)
 
 def remove_stop(tokens):
@@ -63,7 +65,7 @@ def remove_stop(tokens):
 
 # 读取替换字词字典，用于归一化词的说法，如“wmls”和“wm”指代的都是粉丝群体，因此将“wm”替换成“wmls”
 replace_words={}
-rw = open("./data/replace_words_dict.txt","r",encoding='utf-8')
+rw = open(data_join("replace_words_dict.txt"), "r", encoding="utf-8")
 rule = re.compile("【(.+?)】")
 for line in rw:
     line = rule.findall(line)
@@ -94,9 +96,11 @@ def prepare(text,pipeline):
     else:
         return ''
 
-def process_data(input,output):
+def process_data(input, output):
     # input：输入的原始数据集
     # output：输出的文件名，会生成xlsx和pickle两种形式的文件，xlsx方便查看，pickle则方便之后其他的操作
+    input = _resolve_path(input)
+    output = _resolve_path(output)
     np.random.seed(0)
     # 保留名词、动词、形容词、副词、习语等实词
     nva = ["a","ad","an","d","l","s",
@@ -107,6 +111,8 @@ def process_data(input,output):
     df['名动形'] = df['中文分词'].map(lambda ls:[t for t in ls if t[1] in nva])
     df['中文分词数目']=df['中文分词'].map(len)
     df['名动形数目']=df['名动形'].map(len)
-    df[['name','ID','url','date','中文分词','名动形','中文分词数目','名动形数目','粉丝','粉丝_百分位','emoji']].to_excel(output+".xlsx")
-    df[['name','ID','url','date','中文分词','名动形','中文分词数目','名动形数目','粉丝','粉丝_百分位','emoji']].to_pickle(output+".pickle")
-    #return df[['name','ID','url','date','中文分词','名动形','中文分词数目','名动形数目']]
+    token_cols = ['中文分词', '名动形', '中文分词数目', '名动形数目']
+    meta_cols = [c for c in df.columns if c not in token_cols]
+    out_cols = meta_cols + token_cols
+    df[out_cols].to_excel(output+".xlsx")
+    df[out_cols].to_pickle(output+".pickle")
