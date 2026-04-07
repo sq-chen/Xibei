@@ -17,7 +17,7 @@ import math
 
 from paths_config import data_join
 
-# 情感词典（均在仓库根目录 data/）
+# 情感词典（均在 exploratory_data/data/）
 sentiment_dict_path = data_join("情感词典.xlsx")
 conjunction_dict_path = data_join("conjunction_dict.txt")
 adverb_dict_path = data_join("adverb_dict.txt")

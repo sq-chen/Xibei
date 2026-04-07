@@ -1,4 +1,4 @@
-"""路径约定：仓库根目录下 data/、crawled_data/；分析代码与 result/ 在 text_analyse/。"""
+"""路径约定：exploratory_data/ 为套件根（与 text_analyse/ 同级）；其下 data/、crawled_data/；result/ 在 text_analyse/。"""
 import os
 
 # 本文件位于 text_analyse/
@@ -17,17 +17,17 @@ def join(*parts):
 
 
 def data_join(*parts):
-    """相对仓库根目录 data/（词典、停用词等）。"""
+    """相对套件根下 data/（词典、停用词等）。"""
     return os.path.normpath(os.path.join(DATA_DIR, *parts))
 
 
 def crawled_join(*parts):
-    """相对仓库根目录 crawled_data/（爬虫产出的 xlsx、txt）。"""
+    """相对套件根下 crawled_data/（爬虫产出的 xlsx、txt）。"""
     return os.path.normpath(os.path.join(CRAWLED_DIR, *parts))
 
 
 def resolve(path: str) -> str:
-    """相对路径解析：result/ → text_analyse；data/、crawled_data/ → 仓库根；其它 → 仓库根。"""
+    """相对路径解析：result/ → text_analyse；data/、crawled_data/ → 套件根；其它 → 套件根。"""
     if not path:
         return path
     if os.path.isabs(path):

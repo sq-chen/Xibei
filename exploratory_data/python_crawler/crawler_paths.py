@@ -1,4 +1,4 @@
-"""爬虫脚本与仓库根目录 crawled_data、本目录下 cookie 的路径。"""
+"""爬虫脚本与 exploratory_data 套件根下 crawled_data、本目录下 cookie 的路径。"""
 import os
 
 CRAWLER_DIR = os.path.dirname(os.path.abspath(__file__))

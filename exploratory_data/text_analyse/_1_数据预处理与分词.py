@@ -16,7 +16,7 @@ def simplified(text):
         return text
 
 
-# 使用哈工大停止词表（仓库根目录 data/）
+# 使用哈工大停止词表（exploratory_data/data/）
 f = open(data_join("stopwords.txt"), encoding="utf-8")
 stopwords = f.readlines()
 stopwords = [t.strip('\n') for t in stopwords] # 1661个词
