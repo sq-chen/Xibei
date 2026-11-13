@@ -1,0 +1,77 @@
+This is lavaan 0.6-21
+lavaan is FREE software! Please report any bugs.
+New names:
+• `Q` -> `Q...19`
+• `Q` -> `Q...20`
+• `Q` -> `Q...21`
+• `Q` -> `Q...45`
+• `Q` -> `Q...46`
+• `Q` -> `Q...73`
+• `Q` -> `Q...74`
+• `Q` -> `Q...117`
+• `Q` -> `Q...118`
+• `Q` -> `Q...119`
+• `Q` -> `Q...120`
+New names:
+• `Q` -> `Q...19`
+• `Q` -> `Q...20`
+• `Q` -> `Q...21`
+• `Q` -> `Q...45`
+• `Q` -> `Q...46`
+• `Q` -> `Q...70`
+• `Q` -> `Q...71`
+• `Q` -> `Q...114`
+• `Q` -> `Q...115`
+• `Q` -> `Q...116`
+• `Q` -> `Q...117`
+实验组 N = 189 | 对照组 N = 184 | 合计 = 373 
+
+=== 测量不变性 ===
+       步骤     模型  chisq df      p   CFI RMSEA  SRMR
+ configural 形态等值  44.97 30 0.0389 0.994 0.052 0.047
+     metric 载荷等值  84.31 36 0.0000 0.980 0.085 0.066
+     scalar 截距等值 103.87 42 0.0000 0.975 0.089 0.067
+
+形态 vs 载荷等值: chi2 = 39.34 df = 6 p = 0 
+载荷 vs 截距等值: chi2 = 19.56 df = 6 p = 0.0033 
+
+=== 多组中介路径系数（显变量主口径；lavaan 按组名排序：ctrl=对照组 在前，exp=实验组 在后） ===
+     lhs op       rhs group    est    se      z pvalue
+  negemo  ~        HP     1  0.747 0.047 15.997  0.000
+     si3  ~    negemo     1  0.343 0.131  2.622  0.009
+     si3  ~        HP     1  0.184 0.129  1.431  0.153
+  negemo  ~        HP     2  1.032 0.063 16.425  0.000
+     si3  ~    negemo     2  0.219 0.090  2.430  0.015
+     si3  ~        HP     2 -0.534 0.121 -4.431  0.000
+   ind_1 :=     a1*b1     0  0.256 0.099  2.587  0.010
+   ind_2 :=     a2*b2     0  0.226 0.094  2.404  0.016
+ total_1 := cp1+a1*b1     0  0.440 0.085  5.153  0.000
+ total_2 := cp2+a2*b2     0 -0.308 0.078 -3.953  0.000
+
+=== 路径等值检验（显变量；H0: 两组路径相等） ===
+ 约束 chisq_diff df_diff      p           结论
+    a      13.04       1 0.0003 两组有显著差异
+    b       0.61       1 0.4350 两组无显著差异
+   cp      16.23       1 0.0001 两组有显著差异
+  all      60.93       3 0.0000 两组有显著差异
+Warning messages:
+1: lavaan->lav_lavaan_step01_ovnames_checklv():  
+   Some latent variable names collide with observed variable names in the 
+   dataset: HP. Please provide alternative names for the latent variables, or 
+   switch off this check using check.lv.names = FALSE 
+2: lavaan->lav_object_post_check():  
+   some estimated ov variances are negative 
+
+=== 附报：潜变量多组中介（标准化系数 std.all；组1=对照组，组2=实验组） ===
+   lhs op   rhs group    est std.all    se pvalue
+   NEG  ~    HP     1  0.723   0.781 0.058  0.000
+    SI  ~   NEG     1  0.378   0.266 0.172  0.028
+    SI  ~    HP     1  0.268   0.204 0.161  0.097
+   NEG  ~    HP     2  1.052   0.795 0.074  0.000
+    SI  ~   NEG     2  0.288   0.318 0.109  0.008
+    SI  ~    HP     2 -0.689  -0.576 0.152  0.000
+ ind_1 := a1*b1     0  0.273   0.208 0.124  0.027
+ ind_2 := a2*b2     0  0.303   0.253 0.119  0.011
+
+已导出：结果_多组SEM_测量不变性.csv / 结果_多组SEM_路径系数.csv / 结果_多组SEM_等值检验.csv
+完成时间： 2026-10-08 00:57:26 

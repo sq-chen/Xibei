@@ -1,0 +1,88 @@
+Loading required package: Matrix
+
+Attaching package: 'lmerTest'
+
+The following object is masked from 'package:lme4':
+
+    lmer
+
+The following object is masked from 'package:stats':
+
+    step
+
+New names:
+• `Q` -> `Q...19`
+• `Q` -> `Q...20`
+• `Q` -> `Q...21`
+• `Q` -> `Q...45`
+• `Q` -> `Q...46`
+• `Q` -> `Q...73`
+• `Q` -> `Q...74`
+• `Q` -> `Q...117`
+• `Q` -> `Q...118`
+• `Q` -> `Q...119`
+• `Q` -> `Q...120`
+New names:
+• `Q` -> `Q...19`
+• `Q` -> `Q...20`
+• `Q` -> `Q...21`
+• `Q` -> `Q...45`
+• `Q` -> `Q...46`
+• `Q` -> `Q...70`
+• `Q` -> `Q...71`
+• `Q` -> `Q...114`
+• `Q` -> `Q...115`
+• `Q` -> `Q...116`
+• `Q` -> `Q...117`
+
+========== 实验组 （品牌行 N = 567 ） ==========
+clmm act ~ anger   : b = 0.498, OR = 1.645, p = 0.0000
+clmm act ~ disgust : b = 0.502, OR = 1.653, p = 0.0000
+clmm act ~ contempt: b = 0.450, OR = 1.568, p = 0.0000
+attack ~ anger   : b = 2.406, OR = 11.092, p = 0.0000
+attack ~ disgust : b = 2.849, OR = 17.274, p = 0.0000
+attack ~ contempt: b = 1.671, OR = 5.318, p = 0.0001
+like   ~ anger   : b = -0.160, OR = 0.852, p = 0.6451
+like   ~ disgust : b = -0.380, OR = 0.684, p = 0.2498
+like   ~ contempt: b = -0.286, OR = 0.751, p = 0.3757
+none   ~ anger   : b = -5.295, OR = 0.005, p = 0.0263
+none   ~ disgust : b = -4.412, OR = 0.012, p = 0.0848
+none   ~ contempt: b = -2.817, OR = 0.060, p = 0.0037
+
+========== 对照组 （品牌行 N = 552 ） ==========
+clmm act ~ anger   : b = 0.139, OR = 1.149, p = 0.0087
+clmm act ~ disgust : b = 0.146, OR = 1.157, p = 0.0043
+clmm act ~ contempt: b = 0.145, OR = 1.156, p = 0.0036
+attack ~ anger   : b = 0.433, OR = 1.542, p = 0.0047
+attack ~ disgust : b = 0.508, OR = 1.662, p = 0.0007
+attack ~ contempt: b = 0.396, OR = 1.485, p = 0.0051
+like   ~ anger   : b = -1.144, OR = 0.319, p = 0.0000
+like   ~ disgust : b = -1.202, OR = 0.301, p = 0.0000
+like   ~ contempt: b = -0.796, OR = 0.451, p = 0.0000
+none   ~ anger   : b = 0.148, OR = 1.160, p = 0.3422
+none   ~ disgust : b = 0.145, OR = 1.156, p = 0.3316
+none   ~ contempt: b = 0.055, OR = 1.056, p = 0.6962
+
+========== 全部样本 （品牌行 N = 1119 ） ==========
+clmm act ~ anger   : b = 0.383, OR = 1.467, p = 0.0000
+clmm act ~ disgust : b = 0.388, OR = 1.473, p = 0.0000
+clmm act ~ contempt: b = 0.381, OR = 1.463, p = 0.0000
+attack ~ anger   : b = 1.207, OR = 3.343, p = 0.0000
+attack ~ disgust : b = 1.241, OR = 3.459, p = 0.0000
+attack ~ contempt: b = 1.067, OR = 2.906, p = 0.0000
+like   ~ anger   : b = -0.584, OR = 0.558, p = 0.0001
+like   ~ disgust : b = -0.675, OR = 0.509, p = 0.0000
+like   ~ contempt: b = -0.527, OR = 0.591, p = 0.0002
+none   ~ anger   : b = -0.466, OR = 0.627, p = 0.0019
+none   ~ disgust : b = -0.384, OR = 0.681, p = 0.0082
+none   ~ contempt: b = -0.406, OR = 0.666, p = 0.0042
+Warning messages:
+1: In checkConv(attr(opt, "derivs"), opt$par, ctrl = control$checkConv,  :
+  Model failed to converge with max|grad| = 0.166801 (tol = 0.002, component 1)
+  See ?lme4::convergence and ?lme4::troubleshooting.
+2: In checkConv(attr(opt, "derivs"), opt$par, ctrl = control$checkConv,  :
+  Model is nearly unidentifiable: very large eigenvalue
+ - Rescale variables?
+
+已导出：结果_情绪分行为.csv
+完成时间： 2026-10-09 02:52:50 

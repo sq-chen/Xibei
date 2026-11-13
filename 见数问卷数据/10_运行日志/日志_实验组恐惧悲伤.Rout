@@ -1,0 +1,46 @@
+This is lavaan 0.6-21
+lavaan is FREE software! Please report any bugs.
+New names:
+• `Q` -> `Q...19`
+• `Q` -> `Q...20`
+• `Q` -> `Q...21`
+• `Q` -> `Q...45`
+• `Q` -> `Q...46`
+• `Q` -> `Q...73`
+• `Q` -> `Q...74`
+• `Q` -> `Q...117`
+• `Q` -> `Q...118`
+• `Q` -> `Q...119`
+• `Q` -> `Q...120`
+=== 筛查（实验组） ===
+总 197 | 指令题全对 197 | 记忆题全对 193 | 质检正常 193 | 纳入分析 189 
+主分析样本 N = 189 
+
+>>> 单独中介： fear bootstrap 5000 
+========== 实验组 单独中介 - fear ==========
+--- 路径系数 ---
+  lhs  rhs   est    se     z pvalue std.all
+ fear   HP 0.577 0.105 5.507  0.000   0.337
+  si3 fear 0.111 0.061 1.825  0.068   0.151
+  si3   HP 0.376 0.122 3.095  0.002   0.300
+--- 间接效应（bootstrap 95% CI）---
+  效应   est ci.lower ci.upper
+   ind 0.064   -0.005    0.151
+ total 0.440    0.232    0.693
+>>> 单独中介： sadness bootstrap 5000 
+========== 实验组 单独中介 - sadness ==========
+--- 路径系数 ---
+     lhs     rhs   est    se     z pvalue std.all
+ sadness      HP 0.482 0.108 4.461  0.000   0.304
+     si3 sadness 0.096 0.060 1.606  0.108   0.122
+     si3      HP 0.394 0.119 3.317  0.001   0.314
+--- 间接效应（bootstrap 95% CI）---
+  效应   est ci.lower ci.upper
+   ind 0.046   -0.010    0.113
+ total 0.440    0.232    0.693
+Warning message:
+lavaan->lav_model_nvcov_bootstrap():  
+   2 bootstrap runs failed or did not converge. 
+
+已导出：结果_实验组恐惧悲伤单独中介.csv
+完成时间： 2026-10-07 01:45:24 

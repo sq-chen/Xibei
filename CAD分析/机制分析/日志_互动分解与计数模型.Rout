@@ -1,0 +1,45 @@
+连接后: 84032 行；未匹配 CAD 命中: 0 
+========== Part A: 三情绪 → 转发/评论/点赞（log，剔零帖） ==========
+
+=== DV: log_reposts （n = 11561 ） ===
+              variable       coef        se   p_value
+2    anger_hit_cad_pct 0.46023636 0.6048707 0.4467422
+3  disgust_hit_cad_pct 0.07589707 1.2619071 0.9520414
+4 contempt_hit_cad_pct 0.34670506 1.5332196 0.8211053
+Wald 两两: 怒-厌 chi2=0.07 p=0.791 | 怒-鄙 chi2=0.00 p=0.947 | 厌-鄙 chi2=0.01 p=0.911
+
+=== DV: log_comments （n = 26400 ） ===
+              variable       coef        se    p_value
+2    anger_hit_cad_pct -0.7127444 0.3673699 0.05237493
+3  disgust_hit_cad_pct  0.3775614 0.6865487 0.58236443
+4 contempt_hit_cad_pct  0.6183501 0.8594410 0.47185197
+Wald 两两: 怒-厌 chi2=1.84 p=0.175 | 怒-鄙 chi2=1.90 p=0.168 | 厌-鄙 chi2=0.03 p=0.862
+
+=== DV: log_likes （n = 40495 ） ===
+              variable       coef        se    p_value
+2    anger_hit_cad_pct 0.40775175 0.3086933 0.18654363
+3  disgust_hit_cad_pct 0.91207972 0.5447976 0.09410641
+4 contempt_hit_cad_pct 0.08798419 0.6613459 0.89416392
+Wald 两两: 怒-厌 chi2=0.61 p=0.437 | 怒-鄙 chi2=0.18 p=0.673 | 厌-鄙 chi2=0.60 p=0.438
+Warning messages:
+1: Some predictor variables are on very different scales: consider rescaling. 
+You may also use (g)lmerControl(autoscale = TRUE) to improve numerical stability. 
+2: Some predictor variables are on very different scales: consider rescaling. 
+You may also use (g)lmerControl(autoscale = TRUE) to improve numerical stability. 
+3: Some predictor variables are on very different scales: consider rescaling. 
+You may also use (g)lmerControl(autoscale = TRUE) to improve numerical stability. 
+4: Some predictor variables are on very different scales: consider rescaling. 
+You may also use (g)lmerControl(autoscale = TRUE) to improve numerical stability. 
+5: Some predictor variables are on very different scales: consider rescaling. 
+You may also use (g)lmerControl(autoscale = TRUE) to improve numerical stability. 
+6: Some predictor variables are on very different scales: consider rescaling. 
+You may also use (g)lmerControl(autoscale = TRUE) to improve numerical stability. 
+
+========== Part B: 虚伪 → 分项互动 复核 ==========
+log_reposts: 虚伪 coef=-0.0121 p=0.5947
+log_comments: 虚伪 coef=-0.0364 p=0.01736
+log_likes: 虚伪 coef=-0.0351 p=0.01325
+
+========== Part C: 计数模型（glmmTMB） ==========
+
+=== 计数 DV: total ===

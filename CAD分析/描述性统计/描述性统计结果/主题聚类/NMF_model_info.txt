@@ -1,0 +1,5 @@
+n_docs	84023
+n_features	8000
+n_topics	10
+reconstruction_error	273.5916
+extra_stopwords	26

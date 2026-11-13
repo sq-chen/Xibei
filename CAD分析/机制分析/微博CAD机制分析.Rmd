@@ -1,0 +1,431 @@
+---
+title: "西贝微博 CAD 机制分析（虚伪→情绪→传播）"
+author: "毕设 · 微博观测研究"
+date: "2026-09-04"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+# 本代码块：全局设置 + 路径。
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, comment = "##")
+set.seed(20260904)
+
+# 数据文件（相对本 Rmd 所在目录：CAD分析/机制分析/）
+# 宽表与分词 pickle 为上游依赖，位于原 analysis/ 流水线目录（见 README）
+WIDE_PATH <- file.path("..", "..", "analysis", "分词与情感分析", "分词与情感分析结果", "merged_wide_v2.csv")
+CAD_PATH  <- file.path("..", "分词与命中", "结果", "CAD命中_明细.csv")
+OUT_ROOT  <- file.path("机制分析结果")
+dir.create(OUT_ROOT, recursive = TRUE, showWarnings = FALSE)
+```
+
+# 0. 分析说明
+
+- **数据**：`merged_wide_v2.csv`（84,032 帖宽表，含互动量与既有控制变量）左连接
+  `CAD命中_明细.csv`（本流程第 11 步产出：用 CAD词典_v4（两批 197 名被试开放词）计算的 4 类情绪命中计数）。
+- **词典**：CAD词典_v4_终版（虚伪 245 / 261 / 137 / 172；含两批 197 名被试开放词 + LIWC anger + 虚伪相关词）。
+- **核心变量**（均带 `_cad` 后缀，与旧 21 情绪区分）：
+  - `hyp_hit_binary_cad`：虚伪词是否命中（0/1）
+  - `anger/disgust/contempt_hit_cad`：三类情绪命中**次数**；`*_pct` = 次数/帖内词总数
+  - `neg_hit_cad_pct`：三类情绪合计 / 词总数（负面道德情绪强度，中介变量）
+- **假设对应**：H-obs1 虚伪帖传播量更高（§3）；H-obs2 虚伪帖三类情绪命中更高且彼此有差别（§4）；
+  H-obs3 三类情绪对传播的效应及其差异（§5）；H-obs4 虚伪→负面情绪→传播的路径（§6）。
+- **建模约定**：沿用既有机制分析的 HLM 框架——因变量取 log 互动量、剔除零互动帖为主模型，
+  全样本（含零互动）用零膨胀思路做稳健性；控制变量沿用 `_regression_common.R` 全套；
+  随机截距 `(1|user_id)` 处理同一用户多帖。
+- **边界声明**：观测性文本数据，中介结论表述为"间接效应/路径证据"，因果交给实验。
+
+```{r packages}
+# 本代码块：加载包 + 复用既有 HLM 工具（run_hlm / build_formula / Wald 检验等）。
+suppressPackageStartupMessages({
+  library(readr); library(dplyr); library(lme4); library(lmerTest)
+  library(MuMIn); library(emmeans); library(glmmTMB)
+  library(sandwich)      # 聚类稳健标准误（零膨胀 logistic）
+})
+source("_regression_common.R")   # HLM 工具与控制变量清单（本文件夹内副本，源自旧流水线公共模块）
+```
+
+# 1. 数据准备
+
+```{r dataprep}
+# 本代码块：读入宽表与 CAD 命中明细，按 ID 左连接，构造衍生变量，因子化控制变量。
+wide <- read_csv(WIDE_PATH, locale = locale(encoding = "UTF-8"), show_col_types = FALSE,
+                 col_types = cols(.default = col_guess(), ID = col_character()))
+cad  <- read_csv(CAD_PATH, locale = locale(encoding = "UTF-8"), show_col_types = FALSE,
+                 col_types = cols(.default = col_guess(), ID = col_character()))
+cat("宽表:", nrow(wide), "行；CAD 命中明细:", nrow(cad), "行\n")
+
+d <- wide %>% left_join(cad, by = "ID")
+cat("连接后:", nrow(d), "行；未匹配 ID 数:", sum(is.na(d$hyp_hit_binary_cad)), "\n")
+
+# 衍生变量
+d <- d %>%
+  mutate(
+    neg_hit_cad     = anger_hit_cad + disgust_hit_cad + contempt_hit_cad,
+    neg_hit_cad_pct = anger_hit_cad_pct + disgust_hit_cad_pct + contempt_hit_cad_pct,
+    any_engagement  = as.integer(total_engagement > 0)
+  )
+
+# 因子化控制变量（沿用既有约定）
+d <- prepare_regression_df(d)
+
+# 主模型子样本：剔除零互动帖（与既有机制分析一致）
+d_pos <- d %>% filter(total_engagement > 0)
+cat("零互动帖:", sum(!d$any_engagement), sprintf("(%.1f%%)", 100 * mean(!d$any_engagement)),
+    "；主模型子样本:", nrow(d_pos), "\n")
+```
+
+# 2. 描述统计
+
+```{r describe}
+# 本代码块：4 类命中率、虚伪帖互动量初览（H-obs1 的直观版）。
+cat("=== 词典命中率（CAD词典_v3）===\n")
+for (v in c("hyp_hit_binary_cad", "anger_hit_cad", "disgust_hit_cad", "contempt_hit_cad")) {
+  hit <- sum(d[[v]] > 0)
+  cat(sprintf("%s: %.1f%%\n", v, 100 * hit / nrow(d)))
+}
+
+cat("\n=== 虚伪帖 vs 非虚伪帖：互动量对比 ===\n")
+cmp <- d %>% group_by(hyp_hit_binary_cad) %>%
+  summarise(n = n(), 零互动率 = mean(!any_engagement),
+            转发均值 = mean(reposts_count), 评论均值 = mean(comments_count),
+            点赞均值 = mean(attitudes_count), 总互动均值 = mean(total_engagement),
+            总互动中位 = median(total_engagement))
+print(as.data.frame(cmp), row.names = FALSE)
+
+cat("\n=== 虚伪帖内：三类情绪命中次数均值（H-obs2 直观版）===\n")
+hyp_only <- d %>% filter(hyp_hit_binary_cad == 1)
+print(as.data.frame(hyp_only %>% summarise(
+  愤怒 = mean(anger_hit_cad), 厌恶 = mean(disgust_hit_cad), 鄙视 = mean(contempt_hit_cad),
+  愤怒pct = mean(anger_hit_cad_pct), 厌恶pct = mean(disgust_hit_cad_pct),
+  鄙视pct = mean(contempt_hit_cad_pct))), row.names = FALSE)
+```
+
+# 3. H-obs1：虚伪帖的传播量更高
+
+```{r hobs1_main}
+# 本代码块：主模型——虚伪命中 → log 总互动（HLM，剔除零互动帖）。
+# 若 hyp_hit_binary_cad 系数显著为正，说明虚伪帖在有互动的帖子里获得更多互动。
+m1 <- run_hlm(d_pos, "log_total_engagement", "hyp_hit_binary_cad")
+r1 <- model_to_table(m1)[model_to_table(m1)$variable == "hyp_hit_binary_cad", ]
+print(round(r1[setdiff(names(r1), "variable")], 4), row.names = FALSE)
+write_csv_utf8(model_to_table(m1), file.path(OUT_ROOT, "hobs1_main_log_total.csv"))
+```
+
+```{r hobs1_components}
+# 本代码块：稳健性 1——转发/评论/点赞分别作因变量。
+for (y in c("log_reposts", "log_comments", "log_likes")) {
+  m <- run_hlm(d_pos, y, "hyp_hit_binary_cad")
+  tab <- model_to_table(m)
+  r <- tab[tab$variable == "hyp_hit_binary_cad", ]
+  cat(sprintf("%s: coef=%.4f, p=%.4g\n", y, r$coef, r$p_value))
+  write_csv_utf8(tab, file.path(OUT_ROOT, paste0("hobs1_", y, ".csv")))
+}
+```
+
+```{r hobs1_zero}
+# 本代码块：稳健性 2——零互动概率（两段式思路的第一段：虚伪帖是否更"可能"获得互动）。
+# 用固定效应 logistic + 按 user_id 聚类稳健标准误（84k 全样本，避免 glmer 收敛负担）。
+f <- any_engagement ~ hyp_hit_binary_cad + log_text_len + has_pic + has_video +
+  posts_per_hour + user_post_count + is_weekend + verification_type + phase + hour_of_day
+mz <- glm(f, data = d, family = binomial)
+vc <- sandwich::vcovCL(mz, cluster = ~ user_id)     # 聚类稳健协方差
+se <- sqrt(diag(vc))
+z  <- coef(mz) / se
+pv <- 2 * pnorm(-abs(z))
+r <- data.frame(variable = names(coef(mz)), coef = coef(mz), se = se,
+                z = z, p_value = pv, row.names = NULL)
+rr <- r[r$variable == "hyp_hit_binary_cad", ]
+cat(sprintf("hyp → 有互动概率: coef=%.4f, OR=%.3f, z=%.2f, p=%.4g\n",
+            rr$coef, exp(rr$coef), rr$z, rr$p_value))
+write_csv_utf8(r, file.path(OUT_ROOT, "hobs1_zero_inflation_logit.csv"))
+```
+
+# 4. H-obs2：虚伪帖的三类情绪命中更高，且彼此有差别
+
+```{r hobs2_glmm}
+# 本代码块：长格式 Poisson GLMM（glmmTMB）。
+# 每帖拆成 3 行（愤怒/厌恶/鄙视），因变量 = 该类情绪命中次数，
+# offset(log(词总数)) 控制帖长；随机截距 (1|ID) + (1|user_id)。
+# 交互项 emotion:hyp 检验"虚伪对三类情绪的增益是否不同"。
+long <- bind_rows(
+  d %>% transmute(ID, user_id, emotion = "愤怒", count = anger_hit_cad,
+                  nwords = text_len, hyp = hyp_hit_binary_cad,
+                  log_text_len, has_pic, has_video, posts_per_hour,
+                  user_post_count, is_weekend, verification_type, phase, hour_of_day),
+  d %>% transmute(ID, user_id, emotion = "厌恶", count = disgust_hit_cad,
+                  nwords = text_len, hyp = hyp_hit_binary_cad,
+                  log_text_len, has_pic, has_video, posts_per_hour,
+                  user_post_count, is_weekend, verification_type, phase, hour_of_day),
+  d %>% transmute(ID, user_id, emotion = "鄙视", count = contempt_hit_cad,
+                  nwords = text_len, hyp = hyp_hit_binary_cad,
+                  log_text_len, has_pic, has_video, posts_per_hour,
+                  user_post_count, is_weekend, verification_type, phase, hour_of_day)
+) %>%
+  mutate(emotion = relevel(factor(emotion), ref = "愤怒"))
+
+# 词总数用 中文分词数目 更准，但宽表只有 text_len（字符数）——两者高度相关，
+# 且偏移量只影响截距尺度、不影响组间对比结论。
+m2 <- glmmTMB(
+  count ~ emotion * hyp + log_text_len + has_pic + has_video + posts_per_hour +
+    user_post_count + is_weekend + verification_type + phase + hour_of_day +
+    offset(log(nwords)) + (1 | ID) + (1 | user_id),
+  data = long, family = poisson
+)
+cat("=== 固定效应核心项 ===\n")
+print(round(summary(m2)$coefficients$cond[grepl("emotion|hyp", rownames(summary(m2)$coefficients$cond)), ], 4))
+
+# 事后对比：虚伪帖内三类情绪两两比较（H-obs2 核心）
+# 协变量固定在典型值（连续变量取均值、分类变量取参照水平），
+# 避免参考网格随 hour_of_day×phase×认证类型 组合爆炸（沿用 2_虚伪情绪回归.R 的做法）
+at_ref <- list(
+  log_text_len = mean(long$log_text_len, na.rm = TRUE),
+  has_pic = mean(long$has_pic, na.rm = TRUE),
+  has_video = mean(long$has_video, na.rm = TRUE),
+  posts_per_hour = mean(long$posts_per_hour, na.rm = TRUE),
+  user_post_count = mean(long$user_post_count, na.rm = TRUE),
+  is_weekend = mean(long$is_weekend, na.rm = TRUE),
+  verification_type = "普通用户",
+  phase = "P1",
+  hour_of_day = factor(12, levels = levels(long$hour_of_day))
+)
+emm <- emmeans(m2, ~ emotion | hyp, offset = 0, type = "response", at = at_ref)
+cat("\n=== 虚伪帖(hyp=1)内三情绪估计命中率（每词）===\n")
+emm_df <- as.data.frame(emm)   # emmGrid 的 S4 方法，返回普通 data.frame
+print(emm_df[as.character(emm_df$hyp) == "1",
+             intersect(c("emotion", "rate", "lower.CL", "upper.CL"), names(emm_df))],
+      row.names = FALSE)
+cat("\n=== 虚伪帖内两两对比（比率 + p）===\n")
+pr1 <- as.data.frame(pairs(emm))
+class(pr1) <- "data.frame"     # 双保险：as.data.frame 转换 + 剥类，确保普通 data.frame 子集
+pr1 <- pr1[as.character(pr1$hyp) == "1", ]
+print(pr1, row.names = FALSE)
+
+# 虚伪 vs 非虚伪：分情绪看增益（交互的直观表述）
+cat("\n=== 分情绪：虚伪帖 vs 非虚伪帖的命中率比（hyp 效应）===\n")
+pr2 <- as.data.frame(pairs(emmeans(m2, ~ hyp | emotion, offset = 0, type = "response", at = at_ref)))
+class(pr2) <- "data.frame"     # 同上，剥类后再子集
+print(pr2, row.names = FALSE)
+saveRDS(m2, file.path(OUT_ROOT, "hobs2_glmm_fit.rds"))
+```
+
+```{r hobs2_np}
+# 本代码块：非参数佐证——仅虚伪帖样本（n≈1.8万），三类情绪命中次数配对比较。
+hyp_only <- d %>% filter(hyp_hit_binary_cad == 1)
+ft <- friedman.test(as.matrix(hyp_only[c("anger_hit_cad", "disgust_hit_cad", "contempt_hit_cad")]))
+cat(sprintf("Friedman: chi2=%.2f, p=%.4g\n", ft$statistic, ft$p.value))
+pw <- pairwise.wilcox.test(
+  c(hyp_only$anger_hit_cad, hyp_only$disgust_hit_cad, hyp_only$contempt_hit_cad),
+  factor(rep(c("愤怒", "厌恶", "鄙视"), each = nrow(hyp_only))), p.adjust.method = "holm")
+print(pw$p.value)
+```
+
+# 5. H-obs3：三类情绪对传播量的效应与差异
+
+```{r hobs3}
+# 本代码块：三情绪命中比例同入 HLM（剔除零互动帖），并用 Wald 检验两两系数相等。
+m3 <- run_hlm(d_pos, "log_total_engagement",
+              c("anger_hit_cad_pct", "disgust_hit_cad_pct", "contempt_hit_cad_pct"))
+tab3 <- model_to_table(m3)
+t3 <- tab3[tab3$variable %in% c("anger_hit_cad_pct", "disgust_hit_cad_pct", "contempt_hit_cad_pct"), ]
+print(cbind(变量 = t3$variable, round(t3[setdiff(names(t3), "variable")], 4)), row.names = FALSE)
+write_csv_utf8(tab3, file.path(OUT_ROOT, "hobs3_three_emotions.csv"))
+
+cat("\n=== Wald 两两系数相等检验（H0: βi = βj）===\n")
+w_a_d <- run_wald_equal_coef(m3, "anger_hit_cad_pct", "disgust_hit_cad_pct")
+w_a_c <- run_wald_equal_coef(m3, "anger_hit_cad_pct", "contempt_hit_cad_pct")
+w_d_c <- run_wald_equal_coef(m3, "disgust_hit_cad_pct", "contempt_hit_cad_pct")
+wtab <- data.frame(
+  对比 = c("愤怒=厌恶", "愤怒=鄙视", "厌恶=鄙视"),
+  chi2 = c(w_a_d$statistic, w_a_c$statistic, w_d_c$statistic),
+  p = c(w_a_d$p_value, w_a_c$p_value, w_d_c$p_value))
+print(cbind(对比 = wtab$对比, round(wtab[c("chi2", "p")], 4)), row.names = FALSE)
+```
+
+# 6. H-obs4：虚伪帖 → 负面情绪更高 → 传播量更高（路径分析）
+
+```{r hobs4_legs}
+# 本代码块：路径三段（均在 HLM 框架内，控制变量同前）。
+# 段1：虚伪 → 负面情绪（全样本，因变量连续无需剔零）
+m4a <- run_hlm(d, "neg_hit_cad_pct", "hyp_hit_binary_cad")
+# 段2：负面情绪 → 互动（剔零子样本，同时控制虚伪，检验情绪在虚伪之上仍有增量）
+m4b <- run_hlm(d_pos, "log_total_engagement", c("neg_hit_cad_pct", "hyp_hit_binary_cad"))
+# 段3：虚伪 → 互动（不控情绪；与 §3 主模型同）
+m4c <- run_hlm(d_pos, "log_total_engagement", "hyp_hit_binary_cad")
+
+g <- function(m, v) { r <- model_to_table(m); r[r$variable == v, ] }
+cat("段1 hyp→neg:", round(g(m4a, "hyp_hit_binary_cad")$coef, 4),
+    sprintf("p=%.4g\n", g(m4a, "hyp_hit_binary_cad")$p_value))
+cat("段2 neg→互动(控hyp):", round(g(m4b, "neg_hit_cad_pct")$coef, 4),
+    sprintf("p=%.4g\n", g(m4b, "neg_hit_cad_pct")$p_value))
+cat("段2 hyp→互动(控neg):", round(g(m4b, "hyp_hit_binary_cad")$coef, 4),
+    sprintf("p=%.4g\n", g(m4b, "hyp_hit_binary_cad")$p_value))
+cat("段3 hyp→互动(不控):", round(g(m4c, "hyp_hit_binary_cad")$coef, 4),
+    sprintf("p=%.4g\n", g(m4c, "hyp_hit_binary_cad")$p_value))
+write_csv_utf8(bind_rows(model_to_table(m4a), model_to_table(m4b)),
+               file.path(OUT_ROOT, "hobs4_legs.csv"))
+```
+
+```{r hobs4_mediate}
+# 本代码块：间接效应检验（delta 法 Sobel）。
+# 说明：mediation 包不支持 lmer 中介模型（会报 mediator model not implemented），
+# 故用系数乘积法：a 来自"虚伪→情绪"HLM（全样本），b 来自"情绪→互动"HLM（剔零子样本，
+# 已控制虚伪）。两者的 SE 均由 lmer 估计（含用户随机截距的聚类调整），
+# Sobel 标准误用 delta 法：se(ab) = sqrt(b^2*va + a^2*vb)。
+a  <- fixef(m4a)["hyp_hit_binary_cad"]
+va <- vcov(m4a)["hyp_hit_binary_cad", "hyp_hit_binary_cad"]
+b  <- fixef(m4b)["neg_hit_cad_pct"]
+vb <- vcov(m4b)["neg_hit_cad_pct", "neg_hit_cad_pct"]
+ab <- a * b
+se_ab <- sqrt(b^2 * va + a^2 * vb)
+z_ab <- ab / se_ab
+p_ab <- 2 * pnorm(-abs(z_ab))
+cprime <- fixef(m4b)["hyp_hit_binary_cad"]        # 直接效应（控情绪后）
+total  <- fixef(m4c)["hyp_hit_binary_cad"]        # 总效应（不控情绪）
+prop   <- ab / (ab + cprime)                      # 中介占比
+
+sob <- data.frame(路径 = c("a: 虚伪→负面情绪", "b: 负面情绪→互动(控虚伪)",
+                           "c': 虚伪→互动(控情绪)", "c: 虚伪→互动(总效应)",
+                           "间接效应 ab", "中介占比 ab/(ab+c')"),
+                  coef = c(a, b, cprime, total, ab, prop),
+                  se = c(sqrt(va), sqrt(vb), NA, NA, se_ab, NA),
+                  z = c(NA, NA, NA, NA, z_ab, NA),
+                  p = c(coef_pvalue(m4a, "hyp_hit_binary_cad"),
+                        coef_pvalue(m4b, "neg_hit_cad_pct"),
+                        coef_pvalue(m4b, "hyp_hit_binary_cad"),
+                        coef_pvalue(m4c, "hyp_hit_binary_cad"), p_ab, NA))
+print(cbind(sob["路径"], round(sob[c("coef", "se", "z", "p")], 4)), row.names = FALSE)
+cat(sprintf("\nSobel: ab=%.4f, se=%.4f, z=%.2f, p=%.4g\n", ab, se_ab, z_ab, p_ab))
+write_csv_utf8(sob, file.path(OUT_ROOT, "hobs4_mediation_sobel.csv"))
+```
+
+```{r hobs4_parallel}
+# 本代码块：三情绪各自作为中介的 Sobel 间接效应（补充分析）。
+# 每个情绪单独走 a路径(虚伪→该情绪, 全样本) × b路径(该情绪→互动, 剔零子样本控虚伪)。
+ctrl <- paste(CONTINUOUS_CONTROLS, collapse = " + ")
+sobel_one <- function(mvar) {
+  f_a <- as.formula(paste(mvar, "~ hyp_hit_binary_cad +", ctrl,
+                          "+ verification_type + phase + hour_of_day + (1|user_id)"))
+  f_b <- as.formula(paste("log_total_engagement ~ hyp_hit_binary_cad +", mvar, "+", ctrl,
+                          "+ verification_type + phase + hour_of_day + (1|user_id)"))
+  ma <- lmer(f_a, data = d)
+  mb <- lmer(f_b, data = d_pos)
+  a <- fixef(ma)["hyp_hit_binary_cad"]; va <- vcov(ma)["hyp_hit_binary_cad", "hyp_hit_binary_cad"]
+  b <- fixef(mb)[mvar];                vb <- vcov(mb)[mvar, mvar]
+  ab <- a * b; se <- sqrt(b^2 * va + a^2 * vb)
+  data.frame(中介 = mvar, a = a, b = b, 间接效应 = ab, Sobel_se = se,
+             z = ab / se, p = 2 * pnorm(-abs(ab / se)))
+}
+s3 <- bind_rows(
+  sobel_one("anger_hit_cad_pct"),
+  sobel_one("disgust_hit_cad_pct"),
+  sobel_one("contempt_hit_cad_pct"))
+print(cbind(s3["中介"], round(s3[setdiff(names(s3), "中介")], 4)), row.names = FALSE)
+write_csv_utf8(s3, file.path(OUT_ROOT, "hobs4_parallel_sobel.csv"))
+```
+
+# 7. 结果导出
+
+```{r export}
+# 本代码块：输出计分后的主数据（供复核/SPSS）与关键模型 CSV 已完成；
+# 此处汇总所有已导出文件清单。
+cat("已导出（机制分析_CAD/机制分析结果/）：\n")
+print(list.files(OUT_ROOT))
+```
+
+# 8. 结果解读（论文"结果/讨论"部分写作参考）
+
+> 数字对应默认设置：CAD词典_v4（两批 197 名被试开放词）、命中计数口径、主模型剔除零互动帖、
+> 控制变量沿用 `_regression_common.R` 全套、随机截距 (1|user_id)。
+> 观测性文本数据：中介结论表述为"间接效应/路径证据"，因果由实验设计承担。
+
+## 8.1 H-obs1：虚伪帖的传播量 —— **未获支持（调整后为负）**
+
+**结果**：描述层面虚伪帖总互动均值高于非虚伪帖（65.1 vs 48.8，+33%）；
+但控制帖长、媒体、认证类型、阶段、时段、同小时竞争与用户聚类后，
+log 总互动的虚伪系数 **−0.039（p=.004）**——虚伪帖在有互动的帖子里互动量反而低约 4%；
+零互动概率也呈边缘性更低的模式（OR=0.965，p=.076，聚类稳健标准误）。
+
+**解读**：粗对比中的优势完全被协变量吸收——虚伪帖往往更长、更常含媒体或来自
+不同认证用户，这些特征才是互动量的真正来源。虚伪表述本身并不带来更高的实际传播结果。
+
+**与实验一的呼应（重要讨论点）**：实验一发现不一致引发更高的**传播意愿**；
+微博数据测的是**传播结果**。意愿与结果之间的落差可以写进"意愿–行为差距"的讨论：
+真实传播还受粉丝基数、算法分发、信息环境拥挤度（posts_per_hour 已控制）等约束。
+这一对比恰好构成三角证据链中有价值的一环，而不是相互矛盾的失败。
+
+**表述建议**：『描述统计显示虚伪帖的总互动均值高于非虚伪帖（65.1 vs 48.8），
+但纳入协变量与用户随机效应后，虚伪命中的效应反转为负（β=−0.039，p=.004），
+且零互动概率无显著差异。H-obs1 未获支持：虚伪表述本身并不提升帖子的实际传播结果。』
+
+## 8.2 H-obs2：虚伪帖的三类情绪命中更高，且彼此有差别 —— **支持**
+
+**结果**
+- 虚伪主效应显著（p<.001）——虚伪帖的 CAD 情绪词汇整体显著更多；
+- 分情绪增益（hyp1/hyp0 比率）：**鄙视 5.6 倍 > 厌恶 3.8 倍 > 愤怒 1.9 倍**，
+  交互项均显著（p<.001）——虚伪对三类情绪的增益大小确有不同，鄙视的增益最大；
+- 虚伪帖内命中水平：愤怒（0.84 次/帖）> 厌恶（0.40）> 鄙视（0.31），
+  两两比率 2.72 / 2.12 / 0.78（均 p<.001），Friedman χ²=2742.8（p<.001）一致。
+
+**解读**：虚伪表述同时伴随三类道德情绪词汇，支持"虚伪→CAD 情绪"的文本层证据；
+情绪之间在虚伪帖内确有显著差别。
+
+**方法学提醒（写进局限）**：愤怒词典来自 LIWC（262 词），厌恶/鄙视来自问卷词表
+（137/172 词），**词表规模不同会影响绝对水平的比较**——"愤怒最多"部分源于词典更全；
+相对比较（虚伪 vs 非虚伪的增益倍数）不受词典规模影响，应作为主报告口径。
+
+## 8.3 H-obs3：三类情绪对传播的效应与差异 —— **无显著差异（与实验一一致）**
+
+**结果**：三情绪同入 HLM（log 总互动）：愤怒 +0.179（p=.540）、厌恶 +0.997（p=.054，
+边际）、鄙视 −0.248（p=.690）；Wald 两两检验全部不显著（χ²=1.77/0.36/1.52，p=.183/.550/.217）。
+
+**解读**：与实验一 H3 的结论方向一致——没有稳定证据表明哪种情绪对传播的驱动力更强。
+两个样本的"最强候选"还不一致（实验一问卷中仅愤怒的间接效应显著；微博中厌恶边际最强），
+论文可据此表述：『情绪类型间的传播效应差异在两项研究中均未获得稳健支持，
+高相关（实验一）与词典覆盖率差异（微博）可能是部分原因。』
+
+## 8.4 H-obs4：虚伪帖→负面情绪更高→传播量更高的路径 —— **情绪路径成立（遮掩效应模式）**
+
+**结果**
+- 段1：虚伪→负面情绪 +0.0119（p<1e-300）——虚伪帖的 CAD 情绪强度显著更高；
+- 段2：负面情绪→互动（控虚伪）+0.407（p=.022）——情绪促进传播；
+- 段2 中虚伪直接效应 −0.043（p=.001）——控情绪后虚伪仍为负；
+- **间接效应 ab=0.0048，Sobel z=2.29，p=.022**——正向情绪路径显著；
+- 总效应 −0.039 → **不一致中介（遮掩）**：正向情绪路径与负向直接路径并存，
+  中介占比 ab/(ab+c') 为负值（−12.5%）；
+- 并行 Sobel：**厌恶是唯一显著的情绪中介**（ab=.0055，z=2.62，p=.009），愤怒（p=.262）、
+  鄙视（p=.146）不显著。
+
+**解读**：『虚伪表述 → 负面情绪 → 更高互动』的传导链条在文本数据中得到显著支持，
+其中厌恶路径的贡献最突出；但虚伪帖的总体互动（调整后）并不更高，说明情绪之外存在
+抑制传播的因素（如内容形态、信任信号）。这是典型的遮掩效应（suppression），
+论文中应如实报告而非回避。
+
+**表述建议**：『虚伪命中的帖子负面道德情绪强度显著更高（a=.012，p<.001），
+负面情绪正向预测互动量（b=.407，p=.022），情绪路径的间接效应显著为正
+（ab=.0048，Sobel z=2.29，p=.022）；同时虚伪的直接效应显著为负（c'=−.043，p=.001），
+呈遮掩效应模式——虚伪通过情绪促进传播，但总体上虚伪帖的实际传播结果并不更高。』
+
+## 8.5 局限与稳健性说明
+
+1. **因果方向**：高互动帖可能反向吸引情绪化回复；观测设计只能提供路径证据。
+2. **词典覆盖率**：四类词表规模不一（261/245/137/172），绝对命中率比较需谨慎，
+   相对增益（8.2 的倍数）更稳健。
+3. **"传播量"口径**：总互动包含点赞等低门槛行为；转发/评论分量已作稳健性（§3.2）。
+4. **样本边界**：仅西贝事件、关键词检索入库的帖子，推广到一般企业舆情需谨慎。
+5. **Sobel 而非 bootstrap**：mediation 包不支持 lmer 中介，采用 delta 法 Sobel；
+   SE 已含用户聚类调整，但与聚类 bootstrap 相比功效有限。
+
+## 8.6 三项证据整合（实验一 × 微博 × 实验二）
+
+| 层面 | 证据 | 结论 |
+|---|---|---|
+| 意愿（实验一，N=193） | 不一致→虚伪→情绪稳健；情绪→意愿末端两批强度不同（主模型擦边、si2 与分品牌显著） | 心理机制方向成立 |
+| 文本（微博，v4 词典） | 虚伪帖 CAD 情绪更高（增益 1.9–5.6×）、情绪→互动为正、厌恶为唯一显著中介（p=.009） | 情绪路径在真实语料中可复现 |
+| 结果（微博） | 虚伪帖调整后传播量不更高（遮掩效应） | 意愿与行为结果存在差距 |
+| 因果（实验二） | 待做：操纵虚伪 vs 一致，验证因果与边界 | 补上因果与"不一致 vs 单纯负面"的对比 |
+

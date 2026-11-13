@@ -1,0 +1,989 @@
+---
+title: "实验二（真实新闻探索性实验）数据分析"
+author: "毕设 · 实验二"
+date: "2026-09-03"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+# 本代码块：全局设置。所有代码块的提示信息/警告默认不显示。
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, comment = "##",
+                      fig.width = 6, fig.height = 4)
+
+# bootstrap 次数。默认 5000（正式报告用）。
+# 调试/快速预览时可临时降低，例如在 R 里运行 Sys.setenv(BOOT_N="200") 后再 knit。
+N_BOOT <- as.numeric(Sys.getenv("BOOT_N", "5000"))
+
+# 设定随机种子，保证 bootstrap 结果可复现
+set.seed(20260903)
+
+# 数据文件（与本 Rmd 同文件夹，见数导出的原始数据）
+# 两批收集合并后的原始数据：第一批 123 人 + 第二批 74 人 = 197 人（末尾多一列"批次"）
+DATA_FILE <- "../00_原始与整理数据/已采纳_原始数据_合并_实验组.xlsx"
+```
+
+# 0. 分析说明
+
+## 0.1 数据来源与结构
+
+- 数据：见数（Credamo）导出的原始数据，两批收集后合并为 `../00_原始与整理数据/已采纳_原始数据_合并_实验组.xlsx`：
+  第一批 123 人 + 第二次收集 74 人 = 共 197 名被试（同一问卷，两批表头结构完全一致；
+  合并文件末尾追加一列「批次」= 1/2）。
+- 导出格式：第 1 行为题目全文，第 2 行为题号（Q1_1 等），第 3 行起为作答数据。因此导入时 `skip = 1`，以题号行作为表头。
+- 每位被试依次阅读 3 则真实企业新闻（西贝 / 自如 / 始祖鸟），每则新闻后回答：不一致感知 3 条、情绪 15 条 + 1 条指令检测题、传播行为单选题 1 道、传播意愿 3 条。
+- 3 个品牌 = 3 组重复测量。主分析把同一被试在 3 个品牌上的得分取平均（被试水平，N=189：指令题全对 + 记忆题全对 + 质检正常），分品牌分析作为稳健性检验。
+- 第 3.5 节提供两批数据的对比（人口学、核心构念），确认两批可以合并。
+
+## 0.2 变量对照表
+
+| 变量 | 含义 | 计分 |
+|---|---|---|
+| `HP` | 不一致感知全量表（3 条 × 3 品牌） | 前 2 条反向计分 + 第 3 条原向，取均值（9 条） |
+| `anger/disgust/contempt` | 愤怒 / 厌恶 / 蔑视 | 各 3 条目 × 3 品牌取均值（各 9 条） |
+| `fear/sadness` | 恐惧 / 悲伤（对照情绪） | 各 9 条 |
+| `negemo` | 消极道德情绪复合 | 愤怒+厌恶+蔑视 27 条取均值 |
+| `m_action` | 行动组情绪（愤怒+厌恶） | 18 条取均值（道德愤慨复合） |
+| `m_withdraw` | 退缩组情绪（蔑视） | 9 条取均值 |
+| `si3` | 消极传播意愿（主因变量） | 「转发分享+告知亲友+点赞评论」3 条 × 3 品牌取均值（9 条） |
+| `si2` | 主动传播意愿（稳健性 DV） | 仅「转发分享+告知亲友」2 条 × 3 品牌（6 条） |
+| `act_mean` | 行为单选题：主动传播率 | 公开回复/转发=1，其余=0，3 品牌取均值 |
+| `act_ord_mean` | 行为单选题：传播强度（有序版） | 公开回复5 > 转发4 > 点赞3 > 私信2 > 不做1，3 品牌取均值 |
+
+## 0.3 分析路线图（对应假设）
+
+| 步骤 | 分析内容 | 对应假设 |
+|---|---|---|
+| 2 | 数据筛查（记忆题/指令题/质检/时长） | 数据质量 |
+| 4 | 信度分析（Cronbach α） | 测量质量 |
+| 5 | 描述统计 + 单样本 t 检验（vs 中点4）+ 行为单选分布 | H1 现象检验 |
+| 6 | 相关分析 + 偏相关 | H5、各路径预览 |
+| 7 | 回归（SI~不一致；SI~三情绪；SI~两组情绪）+ VIF + 相对权重 | H1、H2 预览 |
+| 8 | CFA 判别效度（3 因子 vs 2 因子 vs 1 因子） | 情绪分组合理性检验 |
+| 9 | bootstrap 中介：平行中介（三情绪）、分组中介、链式中介 | H2、H3、H5 |
+| 10 | Harman 单因子检验 | 共同方法偏差 |
+| 11 | 稳健性/敏感性（换 DV、加协变量、换样本、分品牌） | 结论稳健性 |
+
+## 0.4 样本剔除标准
+
+- 主分析：剔除记忆检测题（材料回顾 3 题）未全部答对者（4 人）、见数质检「疑似异常」者（4 人）与指令检测题（情绪矩阵中嵌入的"此题请选 X"3 题）未全部答对者（0 人，平台已预先过滤），**N=189**。该口径与对照组操纵检验一致。
+- 敏感性分析：仅剔除记忆题未全对者（N=193）与全样本（N=197）作为对照。
+- 作答时长用于报告，不作为剔除标准。
+
+```{r packages}
+# 本代码块：加载所需 R 包。
+# 若提示缺少某个包，运行：install.packages("缺少的包名")
+library(readxl)   # 读取 Excel 文件
+library(psych)    # 信度 alpha、相关矩阵、主成分分析
+library(lavaan)   # 结构方程模型 / bootstrap 中介分析
+```
+
+# 1. 数据导入与列名映射
+
+```{r import}
+# 本代码块：导入原始数据并重命名列。
+# 见数导出文件第 1 行是题目全文（过长，丢弃），第 2 行是题号（用作表头），
+# 所以 read_excel(skip = 1) 跳过第一行。
+dat <- as.data.frame(readxl::read_excel(DATA_FILE, skip = 1))
+
+# 部分列在表头中的题号重名（如多段引导语都叫 "Q"），
+# 先把所有列名改为 V1..V121 的位置编号，避免重名干扰（V121 为两批合并时追加的批次标记）。
+names(dat) <- paste0("V", seq_len(ncol(dat)))
+
+# 位置对照表：V 编号 -> 可读题号。
+# 位置来自对导出文件表头的核对；若见数导出结构有变，只需改这张表。
+colmap <- c(
+  V1="作答ID", V2="用户ID", V5="作答总时长", V18="质检结果",
+  # 西贝：不一致感知 Q1、情绪 Q2（1-15 + 16 指令题）、行为单选 Q3、传播意愿 Q4
+  V22="Q1_1", V23="Q1_2", V24="Q1_3",
+  V25="Q2_1", V26="Q2_2", V27="Q2_3", V28="Q2_4", V29="Q2_5", V30="Q2_6",
+  V31="Q2_7", V32="Q2_8", V33="Q2_9", V34="Q2_10", V35="Q2_11", V36="Q2_12",
+  V37="Q2_13", V38="Q2_14", V39="Q2_15", V40="Q2_16",
+  V41="Q3", V42="Q4_1", V43="Q4_2", V44="Q4_3",
+  # 自如：不一致感知 Q5、情绪 Q6、行为单选 Q7、传播意愿 Q8
+  V47="Q5_1", V48="Q5_2", V49="Q5_3",
+  V50="Q6_1", V51="Q6_2", V52="Q6_3", V53="Q6_4", V54="Q6_5", V55="Q6_6",
+  V56="Q6_7", V57="Q6_8", V58="Q6_9", V59="Q6_10", V60="Q6_11", V61="Q6_12",
+  V62="Q6_13", V63="Q6_14", V64="Q6_15", V65="Q6_16",
+  V66="Q7", V67="Q8_1", V68="Q8_2", V69="Q8_3",
+  # 始祖鸟：不一致感知 Q12、情绪 Q13、行为单选 Q14、传播意愿 Q15
+  V75="Q12_1", V76="Q12_2", V77="Q12_3",
+  V78="Q13_1", V79="Q13_2", V80="Q13_3", V81="Q13_4", V82="Q13_5", V83="Q13_6",
+  V84="Q13_7", V85="Q13_8", V86="Q13_9", V87="Q13_10", V88="Q13_11", V89="Q13_12",
+  V90="Q13_13", V91="Q13_14", V92="Q13_15", V93="Q13_16",
+  V94="Q14", V95="Q15_1", V96="Q15_2", V97="Q15_3",
+  # 人口学与个体差异
+  V98="性别", V99="年龄", V100="学科", V102="社媒时长",
+  V112="互动倾向", V113="转发频率",
+  V114="Q23_1", V115="Q23_2", V116="Q23_3",
+  # 材料回顾记忆题（3 道筛查题）
+  V118="记忆1", V119="记忆2", V120="记忆3",
+  # 两批合并时追加的批次标记（1 = 第一批 123 人，2 = 第二次收集 74 人）
+  V121="批次"
+)
+names(dat)[as.integer(sub("V", "", names(colmap)))] <- unname(colmap)
+
+# 快速校验：导入的行列数、前两列与前几道题的取值
+cat("导入数据：", nrow(dat), "行 ×", ncol(dat), "列\n")
+print(head(dat[c("作答ID", "Q1_1", "Q2_1", "记忆1")], 3))
+```
+
+# 2. 数据筛查
+
+```{r screening}
+# 本代码块：注意力筛查。检查三类质量指标并生成剔除标记，不做删除（后续分析按标记选取）。
+# （1）情绪矩阵中嵌入的指令检测题：西贝应选"比较不同意"，自如应选"比较同意"，始祖鸟应选"完全不同意"
+chk1 <- dat$Q2_16 == "比较不同意"
+chk2 <- dat$Q6_16 == "比较同意"
+chk3 <- dat$Q13_16 == "完全不同意"
+chk_all <- chk1 & chk2 & chk3
+
+# （2）材料回顾记忆题（问卷末尾 3 题，答错说明没有认真读材料）
+mem1 <- dat$记忆1 == "后厨大量使用冷冻食材"
+mem2 <- dat$记忆2 == "全流程甲醛管控，检测达标后出租"
+mem3 <- dat$记忆3 == "赞助在喜马拉雅山脉举办的烟花秀"
+mem_all <- mem1 & mem2 & mem3
+
+# （3）见数平台质检标记
+qua_ok <- dat$质检结果 == "正常"
+
+# 剔除标记：主分析 = 指令题全对 且 记忆题全对 且 质检正常（N=189；指令题 197 人全对，不影响 N）；
+# 敏感性对照 = 仅记忆题全对（N=193）
+keep_main   <- mem_all & qua_ok & chk_all
+keep_strict <- mem_all & qua_ok & chk_all
+
+cat("=== 筛查结果 ===\n")
+cat("总人数:", nrow(dat), "\n")
+cat("指令检测题全对:", sum(chk_all), "人；记忆题全对:", sum(mem_all), "人\n")
+cat("质检正常:", sum(qua_ok), "人；质检疑似异常:", sum(!qua_ok), "人\n")
+cat("主分析样本（指令题全对 + 记忆题全对 + 质检正常）:", sum(keep_main), "人\n")
+cat("敏感性对照（仅记忆题全对）:", sum(mem_all), "人\n")
+
+# 分批次看筛查结果（两批数据是否等质）
+cat("\n--- 分批次筛查 ---\n")
+for (b in sort(unique(dat$批次))) {
+  ii <- dat$批次 == b
+  cat(sprintf("批次 %s（n=%d）：指令题全对 %d 人；记忆题全对 %d 人；质检正常 %d 人\n",
+              b, sum(ii), sum(chk_all[ii]), sum(mem_all[ii]), sum(qua_ok[ii])))
+}
+
+# 作答时长（秒）的描述统计：判断是否有人明显过短作答
+dur <- as.numeric(dat$作答总时长)
+cat("作答时长(秒): 中位数 =", median(dur), "；最小值 =", min(dur),
+    "；<300 秒人数 =", sum(dur < 300), "\n")
+
+# 样本构成描述（用于论文"样本"部分）
+cat("性别: 女", sum(dat$性别 == "女"), "人 / 男", sum(dat$性别 == "男"), "人\n")
+age <- as.numeric(dat$年龄)
+cat("年龄: M =", round(mean(age), 1), "SD =", round(sd(age), 1),
+    "范围 [", min(age), ",", max(age), "]\n")
+print(table(dat$学科))
+```
+
+# 3. 量表计分
+
+```{r scoring}
+# 本代码块：将中文标签转为数字、反向计分、计算各构念的复合分数。
+# 说明：量表均为 7 点。不一致感知前两条是正向措辞（"真心想承担社会责任"、
+# "实际行为正如其宣传的那样好"），得分越高=越认同企业，需要反向计分（8 - 得分），
+# 使所有条目方向一致：得分越高 = 越感知到不一致/虚伪。
+
+# --- 3.1 中文标签 -> 数字 ---
+lk <- c("完全不同意"=1, "不同意"=2, "比较不同意"=3, "一般"=4,
+        "比较同意"=5, "同意"=6, "完全同意"=7)
+lkw <- c("完全不愿意"=1, "不愿意"=2, "比较不愿意"=3, "一般"=4,
+         "比较愿意"=5, "愿意"=6, "非常愿意"=7)
+# 注意：CSR 关注度 3 题用的是"符合"标签组，需单独映射
+lkf <- c("完全不符合"=1, "不符合"=2, "比较不符合"=3, "一般"=4,
+         "比较符合"=5, "符合"=6, "完全符合"=7)
+to_num <- function(x) as.numeric(c(lk, lkw, lkf)[as.character(x)])
+
+# 所有用 7 点计分的量表条目：不一致感知(9) + 情绪(45) + 传播意愿(9) + CSR关注(3)
+scale_items <- c(
+  paste0("Q1_", 1:3), paste0("Q5_", 1:3), paste0("Q12_", 1:3),   # 不一致感知
+  paste0("Q2_", 1:15), paste0("Q6_", 1:15), paste0("Q13_", 1:15), # 情绪（不含指令题）
+  paste0("Q4_", 1:3), paste0("Q8_", 1:3), paste0("Q15_", 1:3),    # 传播意愿
+  paste0("Q23_", 1:3)                                            # CSR 关注度
+)
+dat[scale_items] <- lapply(dat[scale_items], to_num)
+
+# --- 3.2 反向计分（不一致感知正向措辞条目）---
+rev_items <- c("Q1_1", "Q1_2", "Q5_1", "Q5_2", "Q12_1", "Q12_2")
+dat[rev_items] <- lapply(dat[rev_items], function(x) 8 - x)
+
+# --- 3.3 计算复合分数（同一被试 3 个品牌取均值）---
+# 情绪辅助函数：block = 题号前缀（Q2/Q6/Q13），items = 条目序号
+emo_mean <- function(block, items) {
+  rowMeans(dat[paste0(block, "_", items)], na.rm = TRUE)
+}
+CAD <- function(items) {  # 三类情绪在 3 个品牌上的均值（9 条）
+  rowMeans(dat[c(paste0("Q2_", items), paste0("Q6_", items), paste0("Q13_", items))],
+           na.rm = TRUE)
+}
+
+scored <- data.frame(
+  id       = dat$作答ID,
+  # 注：x_inc（HP2 条目反向）与 m_hyp（HP1+HP3）不再拆分使用，仅保留供批次对比描述
+  x_inc    = rowMeans(dat[c("Q1_2", "Q5_2", "Q12_2")], na.rm = TRUE),
+  m_hyp    = rowMeans(dat[c("Q1_1", "Q1_3", "Q5_1", "Q5_3", "Q12_1", "Q12_3")],
+                      na.rm = TRUE),
+  HP       = rowMeans(dat[c(paste0("Q1_", 1:3), paste0("Q5_", 1:3), paste0("Q12_", 1:3))],
+                      na.rm = TRUE),                                               # 不一致感知全量表（9条）
+  # 情绪
+  anger    = CAD(1:3),   disgust  = CAD(4:6),  contempt = CAD(7:9),
+  fear     = CAD(10:12), sadness  = CAD(13:15),
+  negemo   = CAD(1:9),                                          # 消极道德情绪复合（27条）
+  m_action   = rowMeans(dat[c(paste0("Q2_", 1:6), paste0("Q6_", 1:6), paste0("Q13_", 1:6))],
+                        na.rm = TRUE),                          # 行动组：愤怒+厌恶（18条）
+  m_withdraw = CAD(7:9),                                        # 退缩组：蔑视（9条）
+  # 因变量
+  si3      = rowMeans(dat[c(paste0("Q4_", 1:3), paste0("Q8_", 1:3), paste0("Q15_", 1:3))],
+                      na.rm = TRUE),                            # 传播意愿（9条）
+  si2      = rowMeans(dat[c("Q4_1", "Q4_2", "Q8_1", "Q8_2", "Q15_1", "Q15_2")],
+                      na.rm = TRUE),                            # 主动传播意愿（6条，去掉点赞评论）
+  # 行为单选题（Q3/Q7/Q14）
+  act_mean = NA_real_, act_ord_mean = NA_real_,
+  # 协变量
+  female = as.integer(dat$性别 == "女"),                         # 女性 = 1
+  age    = as.numeric(dat$年龄),
+  sm_time = as.numeric(c("少于30分钟"=1, "30分钟–1小时"=2, "1–2小时"=3,
+                         "2–4小时"=4, "4–6小时"=5, "超过6小时"=6)[dat$社媒时长]),
+  sm_inter = as.numeric(c("主要浏览，较少发帖和互动"=1, "偶尔点赞、发帖或评论"=2,
+                          "经常主动发帖、转发、表达观点"=3)[dat$互动倾向]),
+  freq_fwd = as.numeric(dat$转发频率),                           # 平时转发新闻频率（1-7）
+  CSR = rowMeans(dat[c("Q23_1", "Q23_2", "Q23_3")], na.rm = TRUE), # CSR 关注度（3条）
+  # 筛查标记
+  # 主分析样本（keep）= 指令题全对 且 记忆题全对 且 质检正常（N=189）；
+  # keep_mem = 仅记忆题全对（N=193，用作敏感性对照）
+  keep = mem_all & qua_ok & chk_all, keep_mem = mem_all, keep_strict = mem_all & qua_ok & chk_all
+)
+
+# 行为单选题编码：有序版（公开回复5 > 转发4 > 点赞3 > 私信2 > 不做1）；
+# 二分版 act_mean = 3 个品牌中"主动传播（公开回复/转发）"的比例
+act_map <- c("公开回复，发表自己的看法"=5, "转发这条微博（可附加公开评论）"=4,
+             "点赞"=3, "发送私信（其他用户不可见）"=2, "不做任何操作"=1)
+beh_ord <- data.frame(act_map[dat$Q3], act_map[dat$Q7], act_map[dat$Q14])
+scored$act_ord_mean <- rowMeans(beh_ord, na.rm = TRUE)
+scored$act_mean     <- rowMeans((beh_ord >= 4) * 1, na.rm = TRUE)
+
+cat("计分完成。被试水平数据：", nrow(scored), "行。\n")
+print(head(scored[c("HP", "anger", "si3", "act_mean")]))
+```
+
+# 3.5 两批数据对比（补收稳健性）
+
+```{r batch_compare}
+# 本代码块：对比两批收集的数据（第一批 123 人 vs 第二次收集 74 人），
+# 检查人口学与核心构念是否等质、两批能否合并分析。
+scored$批次 <- dat$批次            # 合并文件末尾的批次标记列
+d_b <- scored                     # 全部 197 人（含未剔除者，此处只做对比）
+
+cat("=== 人口学对比 ===\n")
+print(table(批次 = d_b$批次, 性别 = ifelse(d_b$female == 1, "女", "男")))
+cat("性别比例 χ² 检验：")
+print(chisq.test(table(d_b$批次, d_b$female)))
+cat("年龄：批次1 M =", round(mean(d_b$age[d_b$批次 == 1]), 1),
+    "SD =", round(sd(d_b$age[d_b$批次 == 1]), 1),
+    "；批次2 M =", round(mean(d_b$age[d_b$批次 == 2]), 1),
+    "SD =", round(sd(d_b$age[d_b$批次 == 2]), 1), "\n")
+cat("年龄 Welch t：")
+print(t.test(age ~ 批次, data = d_b))
+cat("学科分布：\n")
+print(table(批次 = d_b$批次, 学科 = dat$学科))
+
+cat("\n=== 核心构念均值对比（Welch t，未剔除样本）===\n")
+cmp_vars <- c("HP", "x_inc", "m_hyp", "anger", "disgust", "contempt",
+              "fear", "sadness", "negemo", "si3", "si2", "act_mean", "CSR")
+batch_tab <- t(sapply(cmp_vars, function(v) {
+  x1 <- d_b[[v]][d_b$批次 == 1]; x2 <- d_b[[v]][d_b$批次 == 2]
+  tt <- t.test(x1, x2)
+  c(M1 = mean(x1, na.rm = TRUE), M2 = mean(x2, na.rm = TRUE),
+    diff = tt$estimate[1] - tt$estimate[2], t = tt$statistic,
+    p = tt$p.value)
+}))
+print(round(batch_tab, 3))
+cat("\n解读：p 均大于 .05 则两批等质，可放心合并；个别变量若显著（如第二批极端情绪
+更多），主分析仍用合并样本，可在稳健性部分补充'控制批次'的模型。\n")
+```
+
+# 4. 信度分析
+
+```{r reliability}
+# 本代码块：各构念的 Cronbach α 信度分析。
+# 每个构念的条目 = 3 个品牌 × 每个品牌内条目数（如愤怒 = 3 品牌 × 3 条 = 9 条），
+# 即以"品牌"为重复测量单位计算的信度。α ≥ .70 可接受，≥ .80 良好。
+d <- scored[scored$keep, ]   # 主分析样本
+
+alpha_of <- function(items) {
+  psych::alpha(dat[scored$keep, items], check.keys = FALSE)$total$raw_alpha
+}
+
+rel_df <- data.frame(
+  构念 = c("不一致感知 HP",
+           "愤怒", "厌恶", "蔑视", "恐惧", "悲伤",
+           "消极情绪复合 negemo", "行动组 m_action", "退缩组 m_withdraw",
+           "传播意愿 si3", "主动传播意愿 si2", "CSR关注度"),
+  alpha = c(
+    alpha_of(c(paste0("Q1_", 1:3), paste0("Q5_", 1:3), paste0("Q12_", 1:3))),
+    alpha_of(c(paste0("Q2_", 1:3),  paste0("Q6_", 1:3),  paste0("Q13_", 1:3))),
+    alpha_of(c(paste0("Q2_", 4:6),  paste0("Q6_", 4:6),  paste0("Q13_", 4:6))),
+    alpha_of(c(paste0("Q2_", 7:9),  paste0("Q6_", 7:9),  paste0("Q13_", 7:9))),
+    alpha_of(c(paste0("Q2_", 10:12),paste0("Q6_", 10:12),paste0("Q13_", 10:12))),
+    alpha_of(c(paste0("Q2_", 13:15),paste0("Q6_", 13:15),paste0("Q13_", 13:15))),
+    alpha_of(c(paste0("Q2_", 1:9),  paste0("Q6_", 1:9),  paste0("Q13_", 1:9))),
+    alpha_of(c(paste0("Q2_", 1:6),  paste0("Q6_", 1:6),  paste0("Q13_", 1:6))),
+    alpha_of(c(paste0("Q2_", 7:9),  paste0("Q6_", 7:9),  paste0("Q13_", 7:9))),
+    alpha_of(c(paste0("Q4_", 1:3),  paste0("Q8_", 1:3),  paste0("Q15_", 1:3))),
+    alpha_of(c("Q4_1", "Q4_2", "Q8_1", "Q8_2", "Q15_1", "Q15_2")),
+    alpha_of(c("Q23_1", "Q23_2", "Q23_3"))
+  )
+)
+print(rel_df, row.names = FALSE)
+```
+
+# 5. 描述统计与现象检验（H1）
+
+```{r descriptives}
+# 本代码块：各变量均值/标准差 + 单样本 t 检验（H1 现象检验）。
+# 本实验没有"不一致 vs 一致"对照组，H1（消极不一致行为引发消极传播）在现象层面
+# 的检验方式是：传播意愿显著高于量表中点 4（即被试明确表达了传播意愿）。
+d <- scored[scored$keep, ]
+
+vars <- c("HP", "anger", "disgust", "contempt", "fear", "sadness",
+          "negemo", "m_action", "m_withdraw", "si3", "si2")
+desc_tab <- t(sapply(vars, function(v) {
+  x <- d[[v]]
+  tt <- t.test(x, mu = 4)               # 与量表中点 4 比较
+  c(M = mean(x, na.rm = TRUE), SD = sd(x, na.rm = TRUE),   # na.rm 处理个别缺失
+    t = unname(tt$statistic), df = unname(tt$parameter), p = tt$p.value)
+}))
+print(round(desc_tab, 3))
+
+# 三情绪均值两两比较（H2 预览：三情绪强度是否有差异，配对 t 检验）
+cat("\n=== 三情绪强度两两配对比较 ===\n")
+pairs <- list(c("anger","disgust"), c("anger","contempt"), c("disgust","contempt"))
+for (pr in pairs) {
+  tt <- t.test(d[[pr[1]]], d[[pr[2]]], paired = TRUE)
+  cat(sprintf("%s vs %s: 差值 = %.3f, t = %.2f, p = %.3f\n",
+              pr[1], pr[2], mean(d[[pr[1]]] - d[[pr[2]]]), tt$statistic, tt$p.value))
+}
+```
+
+```{r behavior_choice}
+# 本代码块：行为单选题（Q3/Q7/Q14）的描述统计与检验。
+# 该题是传播意愿矩阵题之外的第二个因变量指标：公开回复/转发 = 主动传播。
+# ① 各选项分布；② 卡方拟合优度（与均匀分布比较）；③ 与矩阵传播意愿的收敛效度（点双列相关）。
+d <- scored[scored$keep, ]
+choice_cols <- c("Q3", "Q7", "Q14")
+brands <- c("西贝", "自如", "始祖鸟")
+
+for (i in seq_along(brands)) {
+  tab <- table(dat[scored$keep, choice_cols[i]])
+  cat("=== ", brands[i], "===\n"); print(tab)
+  ct <- chisq.test(tab, p = rep(1/5, 5))   # 与均匀分布（每种行为 20%）比较
+  cat(sprintf("卡方拟合优度: chi2 = %.2f, p = %.3f\n\n", ct$statistic, ct$p.value))
+}
+
+# 主动传播（公开回复/转发）比例 + 与矩阵传播意愿的点双列相关（收敛效度）
+cat("主动传播比例（三品牌平均）:",
+    sprintf("%.1f%%", mean(d$act_mean) * 100), "\n")
+cat("矩阵传播意愿 si3 与主动传播 act_mean 的点双列相关 r =",
+    round(cor(d$si3, d$act_mean, use = "complete.obs"), 3), "\n")
+
+# 分品牌看：HP / 消极情绪 / 传播意愿 的均值（品牌间自然变异的描述）
+cat("\n=== 分品牌均值（品牌间比较，H1 佐证）===\n")
+# 逐品牌计算（条目已反向计分）
+hp_b <- list(
+  西贝 = rowMeans(dat[scored$keep, c("Q1_1","Q1_2","Q1_3")], na.rm=TRUE),
+  自如 = rowMeans(dat[scored$keep, c("Q5_1","Q5_2","Q5_3")], na.rm=TRUE),
+  始祖鸟 = rowMeans(dat[scored$keep, c("Q12_1","Q12_2","Q12_3")], na.rm=TRUE))
+emo_b <- list(
+  西贝 = rowMeans(dat[scored$keep, paste0("Q2_", 1:9)], na.rm=TRUE),
+  自如 = rowMeans(dat[scored$keep, paste0("Q6_", 1:9)], na.rm=TRUE),
+  始祖鸟 = rowMeans(dat[scored$keep, paste0("Q13_", 1:9)], na.rm=TRUE))
+si_b <- list(
+  西贝 = rowMeans(dat[scored$keep, paste0("Q4_", 1:3)], na.rm=TRUE),
+  自如 = rowMeans(dat[scored$keep, paste0("Q8_", 1:3)], na.rm=TRUE),
+  始祖鸟 = rowMeans(dat[scored$keep, paste0("Q15_", 1:3)], na.rm=TRUE))
+by_brand <- data.frame(
+  品牌 = brands,
+  HP = sapply(hp_b, mean), 消极情绪 = sapply(emo_b, mean), 传播意愿 = sapply(si_b, mean))
+print(cbind(品牌 = by_brand$品牌, round(by_brand[, -1], 3)), row.names = FALSE)
+```
+
+# 6. 相关分析（H5 / 路径预览）
+
+```{r correlations}
+# 本代码块：核心变量的 Pearson 相关矩阵（带 p 值）。
+# 用途：① H5（不一致感知与消极情绪正相关）的直接检验；
+#       ② 中介模型各路径（X→M、M→Y）的初步预览。
+d <- scored[scored$keep, ]
+cvars <- c("HP", "anger", "disgust", "contempt",
+           "negemo", "m_action", "m_withdraw", "si3", "si2", "act_mean")
+ct <- psych::corr.test(d[cvars], adjust = "none")
+print(round(ct$r, 3))     # 相关系数矩阵
+print(round(ct$p, 3))     # 对应 p 值矩阵
+```
+
+```{r partial_corr}
+# 本代码块：偏相关分析（H5 稳健性）。
+# 控制性别、年龄、社媒使用时长、平时转发频率、CSR 关注度后，
+# 检验不一致感知与三类消极情绪、情绪与传播意愿的净相关是否仍然显著。
+d <- scored[scored$keep, ]
+controls <- c("female", "age", "sm_time", "freq_fwd", "CSR")
+
+partial_r <- function(x, y, controls, data) {
+  d2 <- na.omit(data[c(x, y, controls)])
+  f1 <- as.formula(paste(x, "~", paste(controls, collapse = "+")))
+  f2 <- as.formula(paste(y, "~", paste(controls, collapse = "+")))
+  rx <- residuals(lm(f1, d2)); ry <- residuals(lm(f2, d2))
+  ct <- cor.test(rx, ry)
+  c(r = unname(ct$estimate), p = ct$p.value)
+}
+
+pairs <- list(
+  c("HP", "anger"), c("HP", "disgust"), c("HP", "contempt"),
+  c("anger", "si3"), c("disgust", "si3"), c("contempt", "si3"),
+  c("HP", "si3"))
+for (pr in pairs) {
+  res <- partial_r(pr[1], pr[2], controls, d)
+  cat(sprintf("%s ~ %s: r = %.3f, p = %.3f\n", pr[1], pr[2], res["r"], res["p"]))
+}
+```
+
+# 7. 回归分析（H1 / H2 预览）
+
+```{r regressions}
+# 本代码块：回归分析。
+# ① SI ~ HP（不一致感知全量表）：不一致感知→传播意愿的零阶证据（H5 链条可检验部分）；
+#    H1 无对照组、未操纵不一致，只能以现象层检验支持（见第 5 节）；
+# ② SI ~ 三情绪同时进入：H2 预览（哪个情绪预测力更强；注意多重共线性）；
+# ③ SI ~ 行动组+退缩组：分组模型的回归版预览。
+# 所有系数用 scale() 标准化，直接读标准化回归系数 β。
+d <- scored[scored$keep, ]
+
+cat("=== ① SI ~ 不一致感知全量表 HP（H5 链条可检验部分）===\n")
+m1 <- lm(scale(si3) ~ scale(HP), d)
+print(summary(m1)$coefficients)
+cat("R2 =", round(summary(m1)$r.squared, 3), "\n\n")
+
+cat("=== ② SI ~ 愤怒 + 厌恶 + 蔑视（H2 预览，注意共线性）===\n")
+m3 <- lm(scale(si3) ~ scale(anger) + scale(disgust) + scale(contempt), d)
+print(summary(m3)$coefficients)
+cat("R2 =", round(summary(m3)$r.squared, 3), "\n\n")
+
+# 多重共线性诊断：VIF（方差膨胀因子）。VIF > 5 提示共线性严重，> 10 不可接受。
+vif_of <- function(dat0, y, xs) {
+  sapply(xs, function(v) {
+    f <- as.formula(paste(v, "~", paste(setdiff(xs, v), collapse = "+")))
+    1 / (1 - summary(lm(f, dat0))$r.squared)
+  })
+}
+cat("=== VIF（三情绪）===\n")
+print(round(vif_of(d, "si3", c("anger", "disgust", "contempt")), 2))
+
+# 相对权重分析（Johnson, 2000）：在强相关预测变量间公平分配 R2 贡献。
+# 做法：将三情绪正交化后回归 SI，再把各正交成分的贡献按载荷映射回原始情绪。
+rel_weights <- function(y, xdf) {
+  X <- as.matrix(xdf)
+  e <- eigen(cor(X))
+  Z <- X %*% e$vectors %*% diag(1 / sqrt(e$values))
+  bz <- coef(lm(y ~ Z - 1))
+  rw <- as.numeric(e$vectors^2 %*% (e$values * bz^2))
+  names(rw) <- colnames(xdf)
+  rw
+}
+rw <- rel_weights(d$si3, d[c("anger", "disgust", "contempt")])
+cat("\n=== 相对权重（占 R2 的百分比）===\n")
+print(round(rw / sum(rw) * 100, 1))
+
+cat("\n=== ③ SI ~ 行动组(愤怒+厌恶) + 退缩组(蔑视) ===\n")
+mg <- lm(scale(si3) ~ scale(m_action) + scale(m_withdraw), d)
+print(summary(mg)$coefficients)
+cat("R2 =", round(summary(mg)$r.squared, 3), "\n")
+```
+
+```{r logistic}
+# 本代码块：行为单选题的 logistic 回归（辅助因变量分析）。
+# 因变量 = 是否在 ≥2 个品牌上选择主动传播（公开回复/转发）；预测变量 = 三情绪。
+d <- scored[scored$keep, ]
+d$act_bin <- as.integer(d$act_mean >= 2/3)
+mg_bin <- glm(act_bin ~ anger + disgust + contempt, data = d, family = binomial)
+cat("主动传播组 n =", sum(d$act_bin), "；非主动 n =", sum(1 - d$act_bin), "\n")
+print(round(summary(mg_bin)$coefficients, 3))
+```
+
+# 8. 情绪结构判别效度（CFA）
+
+```{r cfa}
+# 本代码块：分品牌 CFA，检验"行动组（愤怒+厌恶）vs 退缩组（蔑视）"的
+# 两因子结构是否比单因子（三情绪无法区分）或三因子（三种情绪各自独立）拟合更好。
+# 这是情绪分组假设的判别效度依据：若 2 因子模型不优于 3 因子/1 因子，分组结论需谨慎。
+# 注意：N≈121 属小样本，结果作探索性参考；拟合标准从宽：CFI>.90, RMSEA<.08, SRMR<.08。
+d <- scored[scored$keep, ]
+dcfa <- dat[scored$keep, ]   # CFA 需要条目级数据（原始 dat，已转为数字并反向计分）
+
+brand_items <- list(西贝 = "Q2", 自如 = "Q6", 始祖鸟 = "Q13")
+
+fit_idx <- function(model, data) {
+  fit <- lavaan::sem(model, data = data)
+  round(lavaan::fitMeasures(fit, c("chisq", "df", "cfi", "rmsea", "srmr")), 3)
+}
+
+cfa_tab <- list()
+for (b in names(brand_items)) {
+  px <- brand_items[[b]]
+  a <- paste0(px, "_", 1:3); g <- paste0(px, "_", 4:6); c <- paste0(px, "_", 7:9)
+  m3f <- paste0("anger =~ ", paste(a, collapse = "+"), "\n",
+                "disgust =~ ", paste(g, collapse = "+"), "\n",
+                "contempt =~ ", paste(c, collapse = "+"))
+  m2f <- paste0("action =~ ", paste(c(a, g), collapse = "+"), "\n",
+                "withdraw =~ ", paste(c, collapse = "+"))
+  m1f <- paste0("negemo =~ ", paste(c(a, g, c), collapse = "+"))
+  cfa_tab[[b]] <- rbind(三因子 = fit_idx(m3f, dcfa),
+                        两因子_行动vs退缩 = fit_idx(m2f, dcfa),
+                        单因子 = fit_idx(m1f, dcfa))
+}
+for (b in names(cfa_tab)) { cat("\n=== ", b, "===\n"); print(cfa_tab[[b]]) }
+
+# 三因子模型下三情绪的因子相关（> .85 提示区分效度有限）
+cat("\n=== 三因子模型的三情绪因子相关（西贝为例）===\n")
+fit3 <- lavaan::sem(paste0("anger =~ Q2_1+Q2_2+Q2_3\n",
+                           "disgust =~ Q2_4+Q2_5+Q2_6\n",
+                           "contempt =~ Q2_7+Q2_8+Q2_9"), data = dcfa)
+sol3 <- lavaan::standardizedSolution(fit3)
+sol3 <- sol3[sol3$op == "~~" & sol3$lhs != sol3$rhs, ]
+print(cbind(sol3[c("lhs", "rhs")], round(sol3["est.std"], 3)), row.names = FALSE)
+```
+
+# 9. 中介分析（bootstrap）
+
+```{r mediation_setup}
+# 本代码块：定义中介模型的语法与结果提取函数。
+# 统一用 lavaan 估计，bootstrap 抽样 N_BOOT 次获得间接效应的 95% 置信区间
+# （与 SPSS PROCESS 宏的逻辑一致：CI 不含 0 即间接效应显著）。
+# 注意：X = HP（Wagner 不一致感知全量表，3 条 × 3 品牌，不拆分）。
+# X 是测量而非操纵变量，中介结论只能表述为"间接效应显著"；
+# "不一致行为→不一致感知"环节需操纵实验检验（本实验所有被试读到的均为不一致新闻）。
+d <- scored[scored$keep, ]
+
+# 提取并打印：路径系数（含标准化）与定义参数（间接效应及其 bootstrap CI）
+med_report <- function(fit, labels = NULL) {
+  # standardized = TRUE 才会输出 std.all（标准化系数）列
+  pe <- lavaan::parameterEstimates(fit, ci = TRUE, standardized = TRUE)
+  paths <- pe[pe$op == "~",
+              c("lhs", "rhs", "est", "se", "z", "pvalue", "std.all")]
+  ind   <- pe[pe$op == ":=", c("lhs", "est", "ci.lower", "ci.upper")]
+  cat("--- 路径系数 ---\n")
+  print(cbind(paths[c("lhs", "rhs")],
+              round(paths[c("est", "se", "z", "pvalue", "std.all")], 3)),
+        row.names = FALSE)
+  cat("--- 间接效应（bootstrap 95% CI）---\n")
+  print(cbind(效应 = ind$lhs, round(ind[c("est", "ci.lower", "ci.upper")], 3)),
+        row.names = FALSE)
+  invisible(ind)
+}
+
+# 模型语法定义（X = 不一致感知 HP 全量表，Y = 传播意愿 si3）
+m_h2 <- '
+  negemo ~ a*X
+  si3    ~ b*negemo + cp*X
+  ind := a*b
+  total := cp + a*b
+'
+m_h3 <- '
+  anger    ~ a1*X
+  disgust  ~ a2*X
+  contempt ~ a3*X
+  si3 ~ b1*anger + b2*disgust + b3*contempt + cp*X
+  ind_anger    := a1*b1
+  ind_disgust  := a2*b2
+  ind_contempt := a3*b3
+  total := cp + a1*b1 + a2*b2 + a3*b3
+  diff_a_d := a1*b1 - a2*b2
+  diff_a_c := a1*b1 - a3*b3
+  diff_d_c := a2*b2 - a3*b3
+'
+m_single <- '
+  M    ~ a*X
+  si3  ~ b*M + cp*X
+  ind := a*b
+  total := cp + a*b
+'
+m_grp <- '
+  m_action   ~ a1*X
+  m_withdraw ~ a2*X
+  si3 ~ b1*m_action + b2*m_withdraw + cp*X
+  ind_action   := a1*b1
+  ind_withdraw := a2*b2
+  diff := a1*b1 - a2*b2
+'
+m_h3b <- '
+  m_action ~ a1*X
+  sadness  ~ a2*X
+  si3 ~ b1*m_action + b2*sadness + cp*X
+  ind_action := a1*b1
+  ind_sadness := a2*b2
+  diff := a1*b1 - a2*b2
+'
+```
+
+```{r mediation_h2}
+# 本代码块：H3 中介检验。
+# 模型：感知不一致 → 消极道德情绪（愤怒+厌恶+蔑视复合）→ 传播意愿。
+# 关键读数：ind 的 95% CI 是否含 0；a、b 路径是否显著；cp（直接效应）是否仍显著。
+d <- scored[scored$keep, ]
+fit_h2 <- lavaan::sem(gsub("X", "HP", m_h2), data = d,
+                      se = "bootstrap", bootstrap = N_BOOT)
+med_report(fit_h2)
+```
+
+```{r mediation_h3}
+# 本代码块：H2 三情绪平行中介与两两对比。
+# 模型：感知不一致 → 愤怒 / 厌恶 / 蔑视（三条平行中介）→ 传播意愿。
+# 关键读数：三个 ind_* 的 CI；diff_* 的 CI 是否含 0（含 0 = 两条间接效应无显著差异）。
+d <- scored[scored$keep, ]
+fit_h3 <- lavaan::sem(gsub("X", "HP", m_h3), data = d,
+                      se = "bootstrap", bootstrap = N_BOOT)
+med_report(fit_h3)
+```
+
+```{r mediation_single}
+# 本代码块：三情绪**单独中介**（导师意见补充——每种情绪单独作为中介变量检验）。
+# 模型：感知不一致 → 愤怒 / 厌恶 / 蔑视（每次只放入一个情绪）→ 传播意愿。
+# 与平行中介的关系：平行中介中三情绪高度相关（CFA 因子相关 .94-1.01），同入模型
+# 产生多重共线、b 路径被压缩；单独中介检验每个情绪各自的间接效应（a_i × b_i），
+# 回答"经由该情绪的传导是否独立存在"。
+# 关键读数：每个 ind 的 bootstrap 95% CI 是否含 0；a、b 路径是否显著。
+d <- scored[scored$keep, ]
+fit_singles <- list()
+for (emo in c("anger", "disgust", "contempt")) {
+  cat("=== 单独中介：", emo, "===\n")
+  fit_single <- lavaan::sem(gsub("M", emo, gsub("X", "HP", m_single)),
+                            data = d, se = "bootstrap", bootstrap = N_BOOT)
+  med_report(fit_single)
+  fit_singles[[emo]] <- fit_single
+}
+```
+
+```{r mediation_group}
+# 本代码块：H2b 情绪分组中介（行动组 vs 退缩组）。
+# 分组依据（文献综述）：愤怒与厌恶同属趋近/行动型情绪，蔑视属退缩型/关系破坏型情绪
+# （Fischer & Roseman 2007 "beat vs ban"；Romani et al. 2013；Hutcherson & Gross 2011）。
+# 预测：经由行动组（愤怒+厌恶）的间接效应 > 经由退缩组（蔑视）的间接效应。
+# 关键读数：ind_action、ind_withdraw 的 CI，以及 diff 的 CI。
+d <- scored[scored$keep, ]
+fit_grp <- lavaan::sem(gsub("X", "HP", m_grp), data = d,
+                       se = "bootstrap", bootstrap = N_BOOT)
+med_report(fit_grp)
+```
+
+```{r mediation_h3b_arousal}
+# 本代码块：H2b 唤醒度对照版（文献综述 H2b 原表述）。
+# 模型：感知不一致 → 行动组（愤怒+厌恶）vs 悲伤（低唤醒对照情绪）→ 传播意愿。
+# 说明：恐惧因评价倾向为自我保护/回避、文献综述中已论证不纳入高唤醒路径（文献汇总§四），
+# 此处用悲伤作低唤醒对照。关键读数：diff 的 CI 是否显著（预期 > 0）。
+d <- scored[scored$keep, ]
+fit_h3b <- lavaan::sem(gsub("X", "HP", m_h3b), data = d,
+                       se = "bootstrap", bootstrap = N_BOOT)
+med_report(fit_h3b)
+```
+
+
+# 10. 共同方法偏差检验（Harman）
+
+```{r harman}
+# 本代码块：Harman 单因子检验。
+# 将模型中全部量表条目（不一致感知 9 + 情绪 45 + 传播意愿 9 = 63 条）放入
+# 未经旋转的主成分分析，看第一个因子解释的方差比例。
+# 惯例：首因子方差解释率 < 40% 认为共同方法偏差不严重（< 50% 也可接受并讨论）。
+d <- scored[scored$keep, ]
+items_h <- c(paste0("Q1_", 1:3), paste0("Q5_", 1:3), paste0("Q12_", 1:3),
+             paste0("Q2_", 1:15), paste0("Q6_", 1:15), paste0("Q13_", 1:15),
+             paste0("Q4_", 1:3), paste0("Q8_", 1:3), paste0("Q15_", 1:3))
+pc <- psych::principal(dat[scored$keep, items_h], nfactors = 1, rotate = "none")
+cat("首因子特征值占比:",
+    round(pc$values[1] / sum(pc$values) * 100, 1), "%\n")
+```
+
+# 11. 稳健性与敏感性分析
+
+```{r robustness_dv}
+# 本代码块：稳健性 1——更换因变量。
+# 用 si2（仅"转发分享+告知亲友"，剔除"点赞评论"）重跑 H3 简单中介，
+# 检验结果是否依赖因变量的计分口径。
+d <- scored[scored$keep, ]
+# 稳健性模型用 min(N_BOOT, 2000) 次 bootstrap：主模型 5000 次、辅助模型 2000 次
+# 符合 PROCESS 惯例，同时显著缩短渲染时间（点估计不受 bootstrap 次数影响）。
+fit_h2_si2 <- lavaan::sem(gsub("si3", "si2", gsub("X", "HP", m_h2)),
+                          data = d, se = "bootstrap", bootstrap = min(N_BOOT, 2000))
+cat("=== H3 模型，因变量改为 si2 ===\n")
+med_report(fit_h2_si2)
+
+
+
+```{r robustness_cov}
+# 本代码块：稳健性 2——加入协变量。
+# 在 H3 模型中加入性别、年龄、社媒时长、平时转发频率、CSR 关注度作为控制变量，
+# 检验中介结果是否由这些个体差异混淆所致。
+d <- scored[scored$keep, ]
+m_h2_cov <- '
+  negemo ~ a*X + g1*female + g2*age + g3*sm_time + g4*freq_fwd + g5*CSR
+  si3    ~ b*negemo + cp*X + h1*female + h2*age + h3*sm_time + h4*freq_fwd + h5*CSR
+  ind := a*b
+  total := cp + a*b
+'
+fit_h2_cov <- lavaan::sem(gsub("X", "HP", m_h2_cov), data = d,
+                          se = "bootstrap", bootstrap = min(N_BOOT, 2000))
+med_report(fit_h2_cov)
+```
+
+```{r sensitivity_samples}
+# 本代码块：敏感性分析——更换剔除标准，检验结论是否依赖样本筛选。
+# 样本 1：全部 197 人（不剔除）；样本 2：仅记忆题全对 193 人；样本 3：主分析 189 人（指令+记忆+质检）。
+# 对每个样本重跑 H3 中介，对比间接效应的 bootstrap CI。
+fit_ind <- function(dat0) {
+  f <- lavaan::sem(gsub("X", "HP", m_h2), data = dat0,
+                   se = "bootstrap", bootstrap = min(N_BOOT, 2000))
+  pe <- lavaan::parameterEstimates(f, ci = TRUE)
+  pe[pe$op == ":=" & pe$lhs == "ind", c("est", "ci.lower", "ci.upper")]
+}
+
+samples <- list(
+  全部N197 = scored,
+  仅记忆N193 = scored[scored$keep_mem, ],
+  主分析N189 = scored[scored$keep, ]
+)
+cat("=== 不同剔除标准下 H3 间接效应（bootstrap 95% CI）===\n")
+for (nm in names(samples)) {
+  cat(nm, ": "); print(round(fit_ind(na.omit(samples[[nm]][c("HP", "negemo", "si3")])), 3))
+}
+```
+
+```{r robustness_brand}
+# 本代码块：稳健性 3——分品牌重跑中介。
+# 主分析把 3 个品牌取平均；这里对每个品牌单独跑"感知不一致→消极情绪→传播意愿"，
+# 看三个品牌的间接效应方向是否一致（检验结论不依赖某一特定品牌材料）。
+d <- scored[scored$keep, ]
+m_brand <- '
+  negemo ~ a*X
+  si3    ~ b*negemo + cp*X
+  ind := a*b
+'
+brand_run <- function(hp_items, emo, si_) {
+  # X = 该品牌不一致感知全量表 3 题均值（条目已反向计分，勿再减 8）
+  bd <- data.frame(HP = rowMeans(dat[scored$keep, hp_items], na.rm = TRUE),
+                   negemo = rowMeans(dat[scored$keep, emo], na.rm = TRUE),
+                   si3 = rowMeans(dat[scored$keep, si_], na.rm = TRUE))
+  f <- lavaan::sem(gsub("X", "HP", m_brand), data = bd, se = "bootstrap",
+                   bootstrap = min(N_BOOT, 2000))
+  pe <- lavaan::parameterEstimates(f, ci = TRUE)
+  pe[pe$op == ":=", c("lhs", "est", "ci.lower", "ci.upper")]
+}
+cat("=== 分品牌 H3 间接效应 ===\n")
+print(rbind(
+  西贝   = brand_run(paste0("Q1_", 1:3), paste0("Q2_", 1:9),  paste0("Q4_", 1:3)),
+  自如   = brand_run(paste0("Q5_", 1:3), paste0("Q6_", 1:9),  paste0("Q8_", 1:3)),
+  始祖鸟 = brand_run(paste0("Q12_", 1:3), paste0("Q13_", 1:9), paste0("Q15_", 1:3))), digits = 3)
+```
+
+# 12. 结果导出
+
+```{r export}
+# 本代码块：把计分后的被试水平数据与关键结果表导出为 CSV（与 Rmd 同文件夹），
+# 便于在 SPSS 中复现或写入论文附录。
+write.csv(scored, "结果_被试水平计分数据.csv", row.names = FALSE)
+
+# 信度表、描述统计表（与论文表格对应）
+write.csv(rel_df, "结果_信度表.csv", row.names = FALSE)
+write.csv(round(desc_tab, 3), "结果_描述统计与单样本t.csv")
+write.csv(round(ct$r, 3), "结果_相关矩阵.csv")
+
+# 中介效应汇总：把各模型的间接效应整理成一张表
+ind_rows <- function(fit, model) {
+  pe <- lavaan::parameterEstimates(fit, ci = TRUE)
+  out <- pe[pe$op == ":=", c("lhs", "est", "ci.lower", "ci.upper")]
+  cbind(模型 = model, 效应 = out$lhs, out[, -1])
+}
+medi_summary <- rbind(
+  ind_rows(fit_h2, "H3: X→消极情绪→SI"),
+  ind_rows(fit_h3, "H2: 三情绪平行中介"),
+  ind_rows(fit_singles[["anger"]], "H2s: 单独中介-愤怒"),
+  ind_rows(fit_singles[["disgust"]], "H2s: 单独中介-厌恶"),
+  ind_rows(fit_singles[["contempt"]], "H2s: 单独中介-蔑视"),
+  ind_rows(fit_grp, "H2b: 行动组vs退缩组"))
+write.csv(medi_summary, "结果_中介效应汇总.csv", row.names = FALSE)
+
+cat("已导出：结果_被试水平计分数据.csv / 结果_信度表.csv / 结果_描述统计与单样本t.csv /",
+    "结果_相关矩阵.csv / 结果_中介效应汇总.csv\n")
+```
+
+# 13. 结果解读（论文"结果/讨论"部分写作参考）
+
+> **假设编号说明**：本节沿用分析时的原始编号（H1–H5）。与汇报所用整合框架的对应：
+> 13.1 = H1（仅现象层证据）；13.2 = H5 链条的可检验部分（不一致感知→情绪→传播意愿，
+> "不一致行为→不一致感知"环节本实验无操纵、由新闻材料保证并留待操纵实验）；
+> 13.3 与 13.4 = H3 的后半段"情绪→传播"。
+
+> **重要变更（Wagner 量表不拆分）**：不一致感知全量表 HP（3 条 × 3 品牌）作为唯一
+> 不一致感知构念进入模型，不再把第 2 条拆作 X、第 1/3 条拆作 M1。原先的链式中介
+> （言行不一→虚伪归因→情绪→传播）随之取消——量表单维构念内部无法构成链条。
+> 完整链式（不一致行为→不一致感知→情绪→行为）由后续操纵实验检验。
+
+> 以下解读对应**默认设置**的输出（主分析 N=189：指令题全对 + 记忆题全对 + 质检正常；主模型 bootstrap 5000、
+> 辅助模型 2000；随机种子 20260903）。
+> 本节数字已对齐正式渲染输出（主模型 bootstrap 5000、辅助 2000）。每个小节给出：
+> 结果 → 结论判定 → 论文表述建议 → 讨论要点。
+
+## 13.1 H1：企业消极不一致行为引发消费者消极传播 —— **支持（仅现象层面）**
+
+**结果**
+- 传播意愿 si3 M=5.434（SD=.941），显著高于量表中点 4（t(188)=20.96，p<.001，d≈1.52）；
+  主动传播意愿 si2 M=5.511（t(188)=22.05，p<.001）；
+- 行为单选题：三品牌平均 **73.2%** 的被试选择主动传播（公开回复/转发），各品牌行为分布均
+  显著偏离均匀分布（χ² 检验 p<.001）；与矩阵意愿点双列相关 r=.621（两种口径收敛）；
+- 分品牌：HP 与消极情绪均值 自如（5.97/5.95）> 西贝（5.72/5.67）≈ 始祖鸟（5.67/5.81），
+  现象不依赖单一案例。
+
+**解读**：无对照组、未操纵"不一致"，H1 只能以**现象层证据**支持——真实不一致新闻情境下
+传播意愿显著高于中点、七成以上被试选择公开回应/转发，且三则新闻方向一致。
+
+**表述建议**：『在真实的不一致新闻情境中，消费者报告了显著高于量表中点的消极传播意愿
+（M=5.43，t(188)=20.96，p<.001），73.2% 的被试在行为选择上倾向于公开回复或转发——
+H1 获得现象层面的支持；由于缺乏对照组，不一致信息的因果效应由后续操纵实验检验。』
+注意措辞统一用"传播意愿/意向"。
+
+## 13.2 不一致感知与情绪/传播的关系；情绪中介 —— **相关稳健；间接效应显著**
+
+**结果**
+- 相关：HP 与愤怒/厌恶/蔑视的零阶相关 r=.719/.735/.707（均 p<.001）；控制性别、年龄、
+  社媒时长、转发频率、CSR 关注度后偏相关仍为 .648/.663/.627（均 p<.001）；
+  HP~si3 零阶 r=.351（p<.001）、偏相关 r=.235（p=.001）；
+- 简单中介（HP→negemo→si3）：a=.747（β=.758，p<.001）——a 段效应量大；
+  b=.343（p=.069）——b 段边际显著；直接效应 c'=.184（p=.130）；
+  **间接效应 .256，bootstrap 95% CI [.029, .540]**——CI 不含 0（显著）；
+  **总效应 .440 [.232, .693]，显著**；
+- 零阶回归：HP 显著预测传播意愿（β=.351，p<.001，R²=.123）；
+- 加协变量后间接效应 .094 [−.081, .323]——不显著。
+
+**解读**：不一致感知→消极情绪（a 段）稳健且效应量大；情绪→传播意愿（b 段）是链条中最弱的
+一环（p=.069，边际），间接效应正式估计显著（CI 不含 0）但量级有限（约为总效应的 58%，
+受 b 段牵制）。总效应稳健显著：不一致感知本身稳定预测传播意愿，"经由情绪"的传导
+达到显著但仍是链条的薄弱环节。
+补充发现仍可报告：CSR 关注度正向预测情绪强度、平时转发频率正向预测传播意愿（协变量模型）。
+
+**表述建议**：『不一致感知与三类道德情绪均显著正相关（控制协变量后仍成立）。
+情绪中介检验显示 a 段稳健（β=.758），b 段边际显著（b=.343，p=.069），
+间接效应 .256 的 95% CI [.029,.540] 不含 0；总效应显著（.440 [.232,.693]）。
+情绪中介显著但效应量有限，末端路径仍是链条最弱一环，论文如实报告。』
+
+## 13.3 H2：三种情绪对传播意愿的影响差异 —— **未获支持**
+
+**结果**
+- 情绪强度：三情绪均值几乎相等（愤怒 5.81 / 厌恶 5.82 / 蔑视 5.79，配对 t 全部 ns）；
+  恐惧 4.27（t=2.88，p=.004）与悲伤 4.66 显著更低——道德情绪的特异性成立；
+- 平行中介：**三个间接效应全部不显著**——愤怒 .155 [−.076, .339]、厌恶 −.045 [−.339, .251]、
+  蔑视 .143 [−.150, .505]；
+- 两两对比：三个 diff 的 CI 全部包含 0——**无显著差异**；
+- 相对权重：愤怒 32.6% / 厌恶 34.3% / 蔑视 33.1%——仍基本三等分；
+- 同入回归：各系数均不显著（R²=.148）。
+
+**解读**：愤怒的间接效应为正且数值最大，但与零无显著差异；三情绪对传播意愿的效应依旧
+高度相似（相对权重三等分、零阶相关 .352–.369）。结合 CFA（三情绪因子相关 .94–1.01），
+三情绪的**内部差异**在本设计中无法检出。诚实结论：三种道德情绪对传播意愿的驱动
+"同大且同向"，不存在可检出的分化。
+
+**表述建议**：『三则新闻同等强度地激活了愤怒、厌恶与蔑视（M=5.79–5.82，均显著高于恐惧与悲伤）。
+平行中介显示三情绪的间接效应均不显著（愤怒 .155，CI [−.076,.339]；厌恶 −.045；蔑视 .143），
+两两对比无显著差异，相对权重三等分。H2 未获支持：三种道德情绪在驱动传播意愿上无分化。』
+讨论要点：CAD 理论预测的"不同情绪不同行动倾向"可能体现在**行为类型**（愤怒→对抗、蔑视→
+关系切断）而非**传播强度**上；也可指向"道德情绪作为整体情绪簇驱动传播"的整合解释。
+
+## 13.4 H2b：情绪分组路径对比 —— **两版均未获支持**
+
+**结果（版本 B：行动组〔愤怒+厌恶〕vs 退缩组〔蔑视〕，探索性分组检验）**
+- 行动组（愤怒+厌恶）间接效应 .141 [−.166, .418]、退缩组（蔑视）.114 [−.158, .445]，
+  差异 .027 [−.549, .530]——**不显著**。
+
+**结果（版本 A：行动组 vs 悲伤〔唤醒度框架的历史对照〕）**
+- 行动组间接效应 .204 [−.036, .458]、悲伤路径 .025 [−.035, .097]，
+  **差异 .179 [−.098, .459]——不显著**。
+
+**解读**：两版均未获支持。需注意，行动组与退缩组的分组仅是探索性划分（文献对厌恶的定位存在分歧，见 13.4 写作建议），不应解读为对方向性假设的检验。
+三个讨论角度：① 测量层面——CFA 显示三情绪因子相关 ≈1，分组方差被稀释；
+② 理论层面——Romani et al. (2013) 发现蔑视同样预测消极口碑，"退缩"是终止品牌关系而非
+传播沉默；③ b 段整体较弱（13.2）使一切经由情绪的路径变弱。
+**写作建议**：版本 B 为探索性分组检验（未获支持，如实报告）；版本 A 作为唤醒度框架的历史对照（未获支持），如实报告为不显著。分组的文献依据提示：Fischer & Roseman（2007）仅区分了愤怒与蔑视，Hutcherson & Gross（2011）则将厌恶置于退缩一侧——因此行动组/退缩组仅是探索性划分，不应解读为方向性假设的检验。
+
+## 13.5 链式中介的说明（原 H4，已取消）
+
+原 H4 链式模型（言行不一条目→虚伪归因两条目→情绪→传播）在量表层面不成立——
+Wagner 不一致感知量表是 3 条目的单维构念，拆分条目构建 X 与 M1 缺乏心理测量学依据，
+链条前两段退化为同一量表内部条目间的相关。因此：
+- 实验二中"不一致感知→情绪→传播"以**简单中介**检验（13.2），X 使用全量表 HP；
+- 完整链式（不一致行为→不一致感知→情绪→行为）的第一环需要操纵实验：
+  操纵/对照不一致信息，检验不一致是否提升不一致感知——这才是整合框架 H5 链条的完整检验。
+
+## 13.6 稳健性与共同方法偏差
+
+| 检验 | 结果 | 结论 |
+|---|---|---|
+| 因变量换 si2（去点赞评论） | 间接效应 .327 [.096, .628] | **显著，方向稳健** |
+| 加协变量（性别/年龄/社媒/转发频率/CSR） | 间接效应 .094 [−.081, .323] | 不显著 |
+| 剔除标准 N=197 / 193 / 189 | 间接效应 .267 / .246 / .256 | 均显著，不依赖筛选 |
+| 分品牌重跑 | 西贝 .230 [.042,.439]、始祖鸟 .312 [.115,.515] 显著；自如 .220 [−.006,.479] 擦边 | **方向全为正**，不依赖特定品牌 |
+| 行为单选题 | 主动传播率 73.2%；与 si3 点双列相关 r=.621 | 两种测量口径收敛 |
+| Harman 单因子 | 首因子 32.8%（<40%） | 共同方法偏差可接受 |
+| 两批等质性（3.5 节） | 13 个构念 Welch t 全部 p≥.31；人口学 p=.45–.59 | 均值层面两批完全等质 |
+
+**解读**：**换因变量（si2）、换剔除标准、分品牌三项口径方向全部稳健**（间接效应均显著或方向为正），
+控制协变量后不显著（b 段被协变量吸收，见 13.2）。
+论文建议：主报告 N=189 结果，将 si2 版与分品牌作为方向稳健性证据，并如实说明协变量版不显著。
+
+## 13.7 两批数据的关联结构差异（研究过程记录，论文可视需要交代）
+
+**现象**：补收 74 人后，"情绪→传播意愿"路径（b 段）整体弱于第一批单独估计。
+
+| 指标 | 第一批（n=121） | 第二批（n=72，主分析） | Welch t |
+|---|---|---|---|
+| si3 均值（SD） | 5.37 (.90) | 5.50 (1.03) | p=.448 |
+| negemo 均值（SD） | 5.79 (.64) | 5.83 (.88) | p=.810 |
+| **negemo~si3 相关** | **.536** | **.212** | — |
+| 情绪→si3 回归系数（控制 HP） | b=.676 | **b≈0（−.016）** | — |
+| si3≥6 高分占比 | 20.7% | 44.4% | — |
+
+两批在**均值上完全等质**（13 个构念全部 ns），但第二批中"情绪越高、传播意愿越高"的关系
+接近消失，传播意愿更普遍地处于高位且不再由情绪分化。
+**对论文的写法建议**：主报告合并样本结果即可；若审稿人问及，可说明"经由情绪的路径在
+两批中强度不同"，并把"情绪→传播的转化可能存在边界条件（表达成本感知、社交网络结构等
+未测量的调节变量）"作为操纵实验的调节设计线索。
+
+## 13.8 总体结论与论文讨论要点
+
+**结论一句话**：真实新闻情境下，企业消极不一致行为被消费者知觉为虚伪（HP=5.78，显著高于
+中点），不一致感知稳定激活愤怒、厌恶、蔑视等道德情绪并预测传播意愿（总效应 .440 [.232,.693]
+显著、行为单选 73.2% 主动传播、H1 现象支持），"经由情绪"的间接传导显著但量级有限
+（.256 [.029,.540]；si2 口径 .327 与分品牌西贝/始祖鸟检验同样显著，协变量版不显著）；
+三种道德情绪在传播驱动上无分化（H2/H2b 未获支持）。整体结论：
+**现象与链条前段稳健、情绪传导显著但末端较弱**。
+
+**局限（建议写进讨论部分）**：① 无对照组，无法排除"单纯负面新闻（不含不一致信息）同样引发
+情绪与传播"的替代解释，因果由操纵实验承接；② X（不一致感知）为测量变量，中介结论为
+关联性证据；③ 横截面单源数据（仅 Harman 检验）；④ 真实品牌带来既有态度/熟悉度混淆；
+⑤ 不一致感知得分呈天花板（SD=.75），HP→SI 相关可能被低估；⑥ 三情绪高相关
+（因子相关 .94–1.01），区分效度有限；⑦ 见数样本库以 19–69 岁网民为主，
+结论向一般消费者的推广需谨慎。
+
+**与操纵实验的衔接建议**：后续实验（虚拟情景操纵 + 控制组）应重点验证本实验无法回答的问题——
+(a) 不一致（vs 单纯负面）信息是否额外提升不一致感知、情绪与传播（补上链条第一环）；
+(b) 情绪的因果中介作用及边界条件（承接 13.7 的调节变量思路）；
+(c) 三情绪差异是否需要操纵性的情绪激活设计才能显现。
+
+```{r session}
+# 本代码块：输出本次分析的 R 环境信息（复现性记录，写论文方法部分可引用）。
+sessionInfo()
+```
